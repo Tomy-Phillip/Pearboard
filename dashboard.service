@@ -1,0 +1,14 @@
+[Unit]
+Description=Pearboard kiosk static file server
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/dashboard
+ExecStart=/usr/bin/python3 -m http.server 8000 --bind 127.0.0.1
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
