@@ -39,11 +39,11 @@ You need an OAuth Client ID before the calendar widget will work. The clock and 
 
 ```bash
 # On your dev machine: copy the repo to the Pi
-rsync -avz --exclude '.git' ./ pi@raspberrypi.local:/home/pi/dashboard/
+rsync -avz --exclude '.git' ./ pearpi@raspberrypi.local:/home/pearpi/Pearboard/
 
 # On the Pi
-ssh pi@raspberrypi.local
-cd /home/pi/dashboard
+ssh pearpi@raspberrypi.local
+cd /home/pearpi/Pearboard
 chmod +x setup.sh
 ./setup.sh
 sudo reboot
@@ -54,7 +54,7 @@ After reboot, Chromium should launch in kiosk mode and load the dashboard. The f
 ### Manual install (if you don't want to run the script)
 
 ```bash
-sudo cp /home/pi/dashboard/dashboard.service /etc/systemd/system/
+sudo cp /home/pearpi/Pearboard/dashboard.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now dashboard.service
 
@@ -70,8 +70,8 @@ sudo systemctl enable --now dashboard.service
 Edit a file, copy it to the Pi, and either reload the page (Ctrl+R if you have a keyboard, or `pkill chromium && systemctl --user restart graphical-session`) or just reboot. No build step.
 
 ```bash
-rsync -avz --exclude '.git' ./ pi@raspberrypi.local:/home/pi/dashboard/
-ssh pi@raspberrypi.local 'sudo systemctl restart dashboard.service'
+rsync -avz --exclude '.git' ./ pearpi@raspberrypi.local:/home/pearpi/Pearboard/
+ssh pearpi@raspberrypi.local 'sudo systemctl restart dashboard.service'
 ```
 
 ## Troubleshooting
@@ -82,7 +82,7 @@ Either `CONFIG.GOOGLE_CLIENT_ID` is empty, or the origin in your OAuth client do
 **Calendar wedges with a 401 loop.**
 Token got into a bad state. Open DevTools and clear `localStorage`, or:
 ```bash
-ssh pi@raspberrypi.local 'rm -rf ~/.config/chromium/Default/Local\ Storage'
+ssh pearpi@raspberrypi.local 'rm -rf ~/.config/chromium/Default/Local\ Storage'
 ```
 
 **Weather shows offline.**
