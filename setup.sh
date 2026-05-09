@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Idempotent installer for Pearboard on Raspberry Pi OS Desktop.
-# Run once on a fresh Pi after copying this repo to /home/pearpi/Pearboard.
+# Run once on a fresh Pi after copying this repo to /home/tomy/Pearboard.
 set -euo pipefail
 
-DASH_DIR="/home/pearpi/Pearboard"
+DASH_DIR="/home/tomy/Pearboard"
 SERVICE_NAME="dashboard.service"
-AUTOSTART_DIR="/home/pearpi/.config/lxsession/LXDE-pi"
+AUTOSTART_DIR="/home/tomy/.config/lxsession/LXDE-pi"
 AUTOSTART_FILE="$AUTOSTART_DIR/autostart"
 CHROMIUM_LINE="@chromium-browser --kiosk --noerrdialogs --disable-translate --disable-features=Translate http://localhost:8000"
 
@@ -14,8 +14,8 @@ if [[ ! -d "$DASH_DIR" ]]; then
   exit 1
 fi
 
-if [[ "$(id -un)" != "pearpi" ]]; then
-  echo "warning: not running as user 'pearpi'. The systemd unit and autostart paths assume /home/pearpi." >&2
+if [[ "$(id -un)" != "tomy" ]]; then
+  echo "warning: not running as user 'tomy'. The systemd unit and autostart paths assume /home/tomy." >&2
 fi
 
 # 1. Install systemd unit

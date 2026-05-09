@@ -44,7 +44,7 @@ Out of scope for v1 (backlog):
 ### File layout
 
 ```
-/home/pearpi/Pearboard/
+/home/tomy/Pearboard/
 ├── index.html         empty containers, one per widget
 ├── style.css          layout, theme tokens, widget styles
 ├── app.js             clock, weather, calendar, auth, add-event
@@ -55,7 +55,7 @@ Out of scope for v1 (backlog):
 
 ### Runtime
 
-- `python3 -m http.server 8000` runs as `dashboard.service` (`Restart=always`, working dir `/home/pearpi/Pearboard`).
+- `python3 -m http.server 8000` runs as `dashboard.service` (`Restart=always`, working dir `/home/tomy/Pearboard`).
 - Chromium launched at desktop start via `~/.config/lxsession/LXDE-pi/autostart`:
   ```
   chromium-browser --kiosk --noerrdialogs --disable-translate \
