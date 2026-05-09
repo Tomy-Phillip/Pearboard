@@ -59,7 +59,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now dashboard.service
 
 # Add to ~/.config/lxsession/LXDE-pi/autostart:
-@chromium-browser --kiosk --noerrdialogs --disable-translate --disable-features=Translate http://localhost:8000
+@chromium --kiosk --noerrdialogs --disable-translate --disable-features=Translate http://localhost:8000
 @xset s off
 @xset -dpms
 @xset s noblank

@@ -7,7 +7,7 @@ DASH_DIR="/home/tomy/Pearboard"
 SERVICE_NAME="dashboard.service"
 AUTOSTART_DIR="/home/tomy/.config/lxsession/LXDE-pi"
 AUTOSTART_FILE="$AUTOSTART_DIR/autostart"
-CHROMIUM_LINE="@chromium-browser --kiosk --noerrdialogs --disable-translate --disable-features=Translate http://localhost:8000"
+CHROMIUM_LINE="@chromium --kiosk --noerrdialogs --disable-translate --disable-features=Translate http://localhost:8000"
 
 if [[ ! -d "$DASH_DIR" ]]; then
   echo "error: $DASH_DIR does not exist. Copy the repo there first." >&2
@@ -31,7 +31,7 @@ mkdir -p "$AUTOSTART_DIR"
 if [[ ! -f "$AUTOSTART_FILE" ]]; then
   cp /etc/xdg/lxsession/LXDE-pi/autostart "$AUTOSTART_FILE" 2>/dev/null || touch "$AUTOSTART_FILE"
 fi
-if ! grep -qF "chromium-browser --kiosk" "$AUTOSTART_FILE"; then
+if ! grep -qF "chromium --kiosk" "$AUTOSTART_FILE"; then
   echo "$CHROMIUM_LINE" >> "$AUTOSTART_FILE"
   echo "  added kiosk launch line"
 else

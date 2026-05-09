@@ -58,7 +58,7 @@ Out of scope for v1 (backlog):
 - `python3 -m http.server 8000` runs as `dashboard.service` (`Restart=always`, working dir `/home/tomy/Pearboard`).
 - Chromium launched at desktop start via `~/.config/lxsession/LXDE-pi/autostart`:
   ```
-  chromium-browser --kiosk --noerrdialogs --disable-translate \
+  chromium --kiosk --noerrdialogs --disable-translate \
     --disable-features=Translate http://localhost:8000
   ```
 
