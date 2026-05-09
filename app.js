@@ -6,7 +6,7 @@
 
 const CONFIG = {
   // Paste your OAuth 2.0 Client ID here. See README for setup steps.
-  GOOGLE_CLIENT_ID: "",
+  GOOGLE_CLIENT_ID: "20853608947-labdcj4jdph1ec0dg02pn2t3dbjej1hc.apps.googleusercontent.com",
   GOOGLE_SCOPE: "https://www.googleapis.com/auth/calendar.events",
   CALENDAR_ID: "primary",
 
@@ -14,9 +14,12 @@ const CONFIG = {
     "https://api.open-meteo.com/v1/forecast" +
     "?latitude=45.5088&longitude=-73.5878" +
     "&current_weather=true" +
-    "&hourly=relativehumidity_2m" +
-    "&daily=temperature_2m_max,temperature_2m_min" +
-    "&timezone=America/Toronto&forecast_days=1",
+    "&hourly=temperature_2m,weathercode" +
+    "&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset" +
+    "&timezone=America/Toronto&forecast_days=2",
+
+  HOURLY_HOURS: 6,
+  NOTIF_MAX: 5,
 
   WEATHER_REFRESH_MS: 5 * 60 * 1000,
   WEATHER_TAP_DEBOUNCE_MS: 10 * 1000,
@@ -25,6 +28,12 @@ const CONFIG = {
   TOKEN_REFRESH_BEFORE_MS: 5 * 60 * 1000, // refresh 5 min before expiry
 
   TIMEZONE: "America/Toronto",
+
+  // Auto theme — light during the day, dark at night. Driven by Open-Meteo
+  // sunrise/sunset when available, otherwise these fixed hours.
+  THEME_AUTO: true,
+  THEME_DAY_START: 7,   // hour, fallback only
+  THEME_DAY_END: 19,    // hour, fallback only
 };
 
 /* =========================================================================
@@ -40,6 +49,11 @@ const state = {
   weatherRefreshing: false,
   lastWeatherTap: 0,
   selectedDateKey: null, // 'YYYY-MM-DD' when day panel open
+
+  // Theme tracking — derived from sunrise/sunset (or fixed hour fallback).
+  sunrise: null,  // ISO string
+  sunset: null,   // ISO string
+  appliedTheme: null,
 
   auth: {
     tokenClient: null,
@@ -60,12 +74,20 @@ const dom = {
   clockDate: $("clock-date"),
 
   weather: $("weather"),
-  weatherLabel: $("weather-label"),
   weatherTemp: $("weather-temp"),
   weatherDesc: $("weather-desc"),
-  weatherHilo: $("weather-hilo"),
-  weatherWind: $("weather-wind"),
-  weatherHumidity: $("weather-humidity"),
+  weatherMax: $("weather-max"),
+  weatherMin: $("weather-min"),
+  weatherIcon: $("weather-icon"),
+  weatherHourly: $("weather-hourly"),
+
+  notifList: $("notif-list"),
+
+  photoSettings: $("photo-settings"),
+  photoMenu: $("photo-menu"),
+  photoChoose: $("photo-choose"),
+  photoReset: $("photo-reset"),
+  photoInput: $("photo-input"),
 
   calTitle: $("cal-title"),
   calPrev: $("cal-prev"),
@@ -111,8 +133,8 @@ function startOfDay(d) {
 
 function isSameDay(a, b) {
   return a.getFullYear() === b.getFullYear()
-      && a.getMonth() === b.getMonth()
-      && a.getDate() === b.getDate();
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
 }
 
 const lsGet = (k) => {
@@ -121,8 +143,91 @@ const lsGet = (k) => {
 };
 
 const lsSet = (k, v) => {
-  try { localStorage.setItem(k, JSON.stringify(v)); } catch {}
+  try { localStorage.setItem(k, JSON.stringify(v)); } catch { }
 };
+
+/* =========================================================================
+ * Photo picker — left-side background image
+ * ========================================================================= */
+
+const PHOTO_KEY = "dashboard_photo";
+const PHOTO_MAX_BYTES = 3 * 1024 * 1024; // ~3MB raw → ~4MB base64
+
+function applyPhotoDataUrl(dataUrl) {
+  // Wrap in url('...'). Data URLs use a base64 alphabet plus :/;,=, all of
+  // which are safe inside single quotes.
+  document.documentElement.style.setProperty("--clock-photo", `url('${dataUrl}')`);
+}
+
+function loadPhotoFromStorage() {
+  const dataUrl = lsGet(PHOTO_KEY);
+  if (typeof dataUrl === "string" && dataUrl.startsWith("data:image/")) {
+    applyPhotoDataUrl(dataUrl);
+  }
+}
+
+function savePhoto(dataUrl) {
+  try {
+    lsSet(PHOTO_KEY, dataUrl);
+    applyPhotoDataUrl(dataUrl);
+  } catch (e) {
+    console.warn("[photo] save failed:", e);
+    alert("L'image est trop volumineuse pour être enregistrée. Choisissez un fichier plus petit.");
+  }
+}
+
+function resetPhoto() {
+  lsSet(PHOTO_KEY, null);
+  document.documentElement.style.removeProperty("--clock-photo");
+}
+
+function wirePhotoPicker() {
+  if (!dom.photoSettings) return;
+
+  const closeMenu = () => dom.photoMenu.classList.add("hidden");
+
+  dom.photoSettings.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dom.photoMenu.classList.toggle("hidden");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (dom.photoMenu.classList.contains("hidden")) return;
+    if (dom.photoMenu.contains(e.target)) return;
+    if (dom.photoSettings.contains(e.target)) return;
+    closeMenu();
+  });
+
+  dom.photoChoose.addEventListener("click", () => {
+    closeMenu();
+    dom.photoInput.click();
+  });
+
+  dom.photoReset.addEventListener("click", () => {
+    closeMenu();
+    resetPhoto();
+  });
+
+  dom.photoInput.addEventListener("change", () => {
+    const file = dom.photoInput.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Le fichier choisi n'est pas une image.");
+      return;
+    }
+    if (file.size > PHOTO_MAX_BYTES) {
+      alert(`L'image dépasse ${Math.round(PHOTO_MAX_BYTES / 1024 / 1024)} Mo. Choisissez un fichier plus petit.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") savePhoto(reader.result);
+    };
+    reader.onerror = () => alert("Impossible de lire le fichier.");
+    reader.readAsDataURL(file);
+    dom.photoInput.value = ""; // allow re-selecting the same file
+  });
+}
 
 /* =========================================================================
  * Clock
@@ -130,11 +235,19 @@ const lsSet = (k, v) => {
 
 function tickClock() {
   const now = new Date();
-  dom.clockTime.textContent =
-    pad2(now.getHours()) + ":" + pad2(now.getMinutes()) + ":" + pad2(now.getSeconds());
-  dom.clockDate.textContent = new Intl.DateTimeFormat("en-CA", {
+  // Reference layout shows HH:MM (no seconds) — easier to read at a glance
+  // and lets us run the layout big without a wide third digit pair.
+  dom.clockTime.textContent = pad2(now.getHours()) + ":" + pad2(now.getMinutes());
+  dom.clockDate.textContent = new Intl.DateTimeFormat("fr-CA", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
   }).format(now);
+  // Re-evaluate theme + refresh notifications on every minute boundary.
+  // Cheap; theme only restyles when the result actually changes, and
+  // notifications re-render quickly from in-memory state.events.
+  if (now.getSeconds() === 0) {
+    applyTheme();
+    renderNotifications();
+  }
 }
 
 function startClock() {
@@ -146,63 +259,213 @@ function startClock() {
   }, drift);
 }
 
+function applyTheme() {
+  if (!CONFIG.THEME_AUTO) return;
+  const now = new Date();
+  let isDay;
+  if (state.sunrise && state.sunset) {
+    const sr = new Date(state.sunrise);
+    const ss = new Date(state.sunset);
+    isDay = now >= sr && now < ss;
+  } else {
+    const h = now.getHours();
+    isDay = h >= CONFIG.THEME_DAY_START && h < CONFIG.THEME_DAY_END;
+  }
+  const next = isDay ? "light" : "dark";
+  if (next !== state.appliedTheme) {
+    document.documentElement.dataset.theme = next;
+    state.appliedTheme = next;
+  }
+}
+
 /* =========================================================================
  * Weather
  * ========================================================================= */
 
+/* WMO weather code → inline SVG icon. Inline so it's offline-resilient
+ * and themeable; each icon picks its own colors to stay distinct on dark bg. */
+const WEATHER_ICONS = {
+  sunny: `
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="32" cy="32" r="11" fill="#ffd166"/>
+      <g stroke="#ffb547" stroke-width="3" stroke-linecap="round">
+        <line x1="32" y1="6"  x2="32" y2="13"/>
+        <line x1="32" y1="51" x2="32" y2="58"/>
+        <line x1="6"  y1="32" x2="13" y2="32"/>
+        <line x1="51" y1="32" x2="58" y2="32"/>
+        <line x1="13.7" y1="13.7" x2="18.6" y2="18.6"/>
+        <line x1="45.4" y1="45.4" x2="50.3" y2="50.3"/>
+        <line x1="13.7" y1="50.3" x2="18.6" y2="45.4"/>
+        <line x1="45.4" y1="18.6" x2="50.3" y2="13.7"/>
+      </g>
+    </svg>`,
+  partlyCloudy: `
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="22" cy="22" r="8" fill="#ffd166"/>
+      <g stroke="#ffb547" stroke-width="2.4" stroke-linecap="round">
+        <line x1="22" y1="6"  x2="22" y2="11"/>
+        <line x1="6"  y1="22" x2="11" y2="22"/>
+        <line x1="10.7" y1="10.7" x2="14.2" y2="14.2"/>
+        <line x1="29.3" y1="10.7" x2="33"   y2="14.2"/>
+      </g>
+      <path d="M19 46c-5 0-9-4-9-9 0-5 4-8 8-9 1-7 7-12 14-12 8 0 14 6 14 14h2c5 0 9 4 9 9s-4 7-9 7H19z"
+            fill="#7d8aa8"/>
+    </svg>`,
+  cloudy: `
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18 50c-6 0-11-5-11-11 0-6 5-10 10-11 1-7 8-12 16-12 9 0 16 7 16 16 6 0 10 4 10 10s-4 8-10 8H18z"
+            fill="#9aa6c4"/>
+    </svg>`,
+  fog: `
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18 36c-6 0-11-5-11-11 0-6 5-10 10-11 1-7 8-12 16-12 9 0 16 7 16 16 6 0 10 4 10 10s-4 8-10 8H18z"
+            fill="#9aa6c4" opacity="0.85"/>
+      <g stroke="#c8d0e4" stroke-width="3" stroke-linecap="round">
+        <line x1="10" y1="46" x2="54" y2="46"/>
+        <line x1="6"  y1="54" x2="48" y2="54"/>
+      </g>
+    </svg>`,
+  rain: `
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18 38c-6 0-11-5-11-11 0-6 5-10 10-11 1-7 8-12 16-12 9 0 16 7 16 16 6 0 10 4 10 10s-4 8-10 8H18z"
+            fill="#7d8aa8"/>
+      <g stroke="#6aa8ff" stroke-width="3" stroke-linecap="round">
+        <line x1="20" y1="46" x2="17" y2="58"/>
+        <line x1="32" y1="46" x2="29" y2="58"/>
+        <line x1="44" y1="46" x2="41" y2="58"/>
+      </g>
+    </svg>`,
+  snow: `
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18 38c-6 0-11-5-11-11 0-6 5-10 10-11 1-7 8-12 16-12 9 0 16 7 16 16 6 0 10 4 10 10s-4 8-10 8H18z"
+            fill="#9aa6c4"/>
+      <g fill="#e8f1ff">
+        <circle cx="20" cy="52" r="2.6"/>
+        <circle cx="32" cy="56" r="2.6"/>
+        <circle cx="44" cy="52" r="2.6"/>
+      </g>
+    </svg>`,
+  thunder: `
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18 36c-6 0-11-5-11-11 0-6 5-10 10-11 1-7 8-12 16-12 9 0 16 7 16 16 6 0 10 4 10 10s-4 8-10 8H18z"
+            fill="#5e6a85"/>
+      <polygon points="32,40 24,52 30,52 26,62 40,46 33,46 37,40" fill="#ffb547"/>
+    </svg>`,
+};
+
+function pickWeatherIcon(code) {
+  if (code === 0) return "sunny";
+  if (code === 1 || code === 2) return "partlyCloudy";
+  if (code === 3) return "cloudy";
+  if (code === 45 || code === 48) return "fog";
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return "rain";
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return "snow";
+  if (code >= 95) return "thunder";
+  return "cloudy";
+}
+
 const WMO = {
-  0: "Clear",
-  1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
-  45: "Fog", 48: "Rime fog",
-  51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
-  56: "Freezing drizzle", 57: "Heavy freezing drizzle",
-  61: "Light rain", 63: "Rain", 65: "Heavy rain",
-  66: "Freezing rain", 67: "Heavy freezing rain",
-  71: "Light snow", 73: "Snow", 75: "Heavy snow",
-  77: "Snow grains",
-  80: "Rain showers", 81: "Heavy rain showers", 82: "Violent rain showers",
-  85: "Snow showers", 86: "Heavy snow showers",
-  95: "Thunderstorm",
-  96: "Thunderstorm with hail", 99: "Severe thunderstorm with hail",
+  0: "Ciel dégagé",
+  1: "Plutôt dégagé", 2: "Partiellement nuageux", 3: "Couvert",
+  45: "Brouillard", 48: "Brouillard givrant",
+  51: "Bruine légère", 53: "Bruine", 55: "Bruine forte",
+  56: "Bruine verglaçante", 57: "Bruine verglaçante forte",
+  61: "Pluie légère", 63: "Pluie", 65: "Pluie forte",
+  66: "Pluie verglaçante", 67: "Pluie verglaçante forte",
+  71: "Neige légère", 73: "Neige", 75: "Neige forte",
+  77: "Grains de neige",
+  80: "Averses", 81: "Averses fortes", 82: "Averses violentes",
+  85: "Averses de neige", 86: "Averses de neige fortes",
+  95: "Orage",
+  96: "Orage avec grêle", 99: "Orage violent avec grêle",
 };
 
 function renderWeather(payload, opts = {}) {
   if (!payload) {
     dom.weatherTemp.textContent = "—°";
-    dom.weatherDesc.textContent = "Offline";
-    dom.weatherLabel.innerHTML = `Weather <span style="color:var(--muted)">· offline</span>`;
-    dom.weatherHilo.textContent = "—/—";
-    dom.weatherWind.textContent = "—";
-    dom.weatherHumidity.textContent = "—";
+    dom.weatherTemp.style.removeProperty("--temp-color");
+    dom.weatherTemp.style.removeProperty("--temp-glow");
+    dom.weatherDesc.textContent = "Hors ligne";
+    dom.weatherMax.textContent = "—°";
+    dom.weatherMin.textContent = "—°";
+    dom.weatherIcon.innerHTML = "";
+    if (dom.weatherHourly) dom.weatherHourly.innerHTML = "";
     return;
   }
   const cw = payload.current_weather || {};
   const daily = payload.daily || {};
-  const hourly = payload.hourly || {};
 
   const temp = Math.round(cw.temperature);
   const code = cw.weathercode;
-  const wind = Math.round(cw.windspeed);
   const hi = daily.temperature_2m_max ? Math.round(daily.temperature_2m_max[0]) : null;
   const lo = daily.temperature_2m_min ? Math.round(daily.temperature_2m_min[0]) : null;
 
-  let humidity = "—";
-  if (hourly.time && hourly.relativehumidity_2m) {
-    const nowKey = new Date().toISOString().slice(0, 13);
-    let idx = hourly.time.findIndex(t => t.startsWith(nowKey));
-    if (idx === -1) idx = 0;
-    humidity = `${hourly.relativehumidity_2m[idx]}%`;
+  dom.weatherTemp.textContent = `${temp}°`;
+  const [tempColor, tempGlow] = tempPalette(temp);
+  dom.weatherTemp.style.setProperty("--temp-color", tempColor);
+  dom.weatherTemp.style.setProperty("--temp-glow", tempGlow);
+  const desc = WMO[code] ?? "—";
+  dom.weatherDesc.innerHTML = opts.stale
+    ? `<span class="stale-dot"></span>${desc}`
+    : desc;
+  dom.weatherMax.textContent = hi != null ? `${hi}°` : "—°";
+  dom.weatherMin.textContent = lo != null ? `${lo}°` : "—°";
+  dom.weatherIcon.innerHTML = WEATHER_ICONS[pickWeatherIcon(code)] || "";
+
+  renderHourly(payload.hourly);
+
+  state.sunrise = daily.sunrise?.[0] || null;
+  state.sunset  = daily.sunset?.[0]  || null;
+  applyTheme();
+}
+
+function renderHourly(hourly) {
+  if (!dom.weatherHourly) return;
+  if (!hourly || !hourly.time || !hourly.temperature_2m) {
+    dom.weatherHourly.innerHTML = "";
+    return;
+  }
+  // Find current hour index in the hourly.time array (ISO strings without TZ).
+  const now = new Date();
+  const nowKey = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}T${pad2(now.getHours())}`;
+  let idx = hourly.time.findIndex(t => t.startsWith(nowKey));
+  if (idx === -1) idx = 0;
+
+  const count = CONFIG.HOURLY_HOURS;
+  const slice = [];
+  for (let i = 0; i < count; i++) {
+    const j = idx + i;
+    if (j >= hourly.time.length) break;
+    slice.push({
+      time: hourly.time[j],
+      temp: Math.round(hourly.temperature_2m[j]),
+      code: hourly.weathercode ? hourly.weathercode[j] : 0,
+    });
   }
 
-  dom.weatherTemp.textContent = `${temp}°`;
-  dom.weatherDesc.textContent = WMO[code] ?? "—";
-  dom.weatherHilo.textContent = (hi != null && lo != null) ? `${hi}°/${lo}°` : "—/—";
-  dom.weatherWind.textContent = `${wind} km/h`;
-  dom.weatherHumidity.textContent = humidity;
+  dom.weatherHourly.innerHTML = slice.map(h => {
+    // Open-Meteo's hourly.time is `YYYY-MM-DDTHH:MM` in the requested timezone.
+    const hh = h.time.slice(11, 13);
+    const label = `${Number(hh)}h`;
+    const icon = WEATHER_ICONS[pickWeatherIcon(h.code)] || "";
+    return `
+      <div class="weather-hour">
+        <span class="weather-hour-time">${label}</span>
+        <span class="weather-hour-icon">${icon}</span>
+        <span class="weather-hour-temp">${h.temp}°</span>
+      </div>
+    `;
+  }).join("");
+}
 
-  dom.weatherLabel.innerHTML = opts.stale
-    ? `<span class="stale-dot"></span>Weather`
-    : `Weather`;
+function tempPalette(t) {
+  if (t <= -10) return ["#7fd8ff", "rgba(127,216,255,0.45)"];
+  if (t <= 0) return ["#a3c4ff", "rgba(163,196,255,0.40)"];
+  if (t <= 10) return ["#cfd9ff", "rgba(207,217,255,0.30)"];
+  if (t <= 20) return ["#ffffff", "rgba(255,255,255,0.20)"];
+  if (t <= 26) return ["#ffd47a", "rgba(255,212,122,0.40)"];
+  if (t <= 32) return ["#ffa86a", "rgba(255,168,106,0.50)"];
+  return ["#ff7a5e", "rgba(255,122,94,0.55)"];
 }
 
 async function fetchWeather() {
@@ -307,7 +570,8 @@ function ensureTokenClient() {
   state.auth.tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CONFIG.GOOGLE_CLIENT_ID,
     scope: CONFIG.GOOGLE_SCOPE,
-    callback: () => {}, // overridden per-call
+    callback: () => { },        // overridden per-call
+    error_callback: () => { },  // overridden per-call
   });
   return state.auth.tokenClient;
 }
@@ -318,6 +582,9 @@ function requestToken({ silent }) {
     try { client = ensureTokenClient(); }
     catch (e) { reject(e); return; }
 
+    let settled = false;
+    const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+
     client.callback = (resp) => {
       if (resp && resp.access_token) {
         state.auth.accessToken = resp.access_token;
@@ -326,16 +593,26 @@ function requestToken({ silent }) {
         persistToken();
         scheduleSilentRefresh();
         showCalendarOverlay(false);
-        resolve(resp.access_token);
+        settle(resolve, resp.access_token);
       } else {
-        reject(new Error(resp?.error || "No access token returned"));
+        settle(reject, new Error(resp?.error || "No access token returned"));
       }
+    };
+
+    client.error_callback = (err) => {
+      settle(reject, new Error(err?.type || err?.message || "gis_error"));
     };
 
     try {
       client.requestAccessToken({ prompt: silent ? "" : "consent" });
     } catch (e) {
-      reject(e);
+      settle(reject, e);
+    }
+
+    // Safety net: if GIS never invokes either callback within 8 s for a silent
+    // attempt, treat it as a failure so the UI can show the Connect button.
+    if (silent) {
+      setTimeout(() => settle(reject, new Error("silent_timeout")), 8000);
     }
   });
 }
@@ -345,7 +622,7 @@ function showCalendarOverlay(show, msg) {
     dom.calOverlay.classList.add("hidden");
     return;
   }
-  dom.calOverlayMsg.textContent = msg || "Connect Google Calendar";
+  dom.calOverlayMsg.textContent = msg || "Connecter Google Calendar";
   dom.calOverlay.classList.remove("hidden");
 }
 
@@ -384,20 +661,24 @@ async function gcalFetch(url, opts = {}, retried = false) {
  * ========================================================================= */
 
 function monthLabel(y, m) {
-  return new Intl.DateTimeFormat("en-CA", { month: "long", year: "numeric" })
+  const s = new Intl.DateTimeFormat("fr-CA", { month: "long", year: "numeric" })
     .format(new Date(y, m, 1));
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function classifyEventColor(ev) {
-  // Google colorIds 9=blueberry, 10=basil(green), 5=banana(yellow). We map our
-  // three offered colors to these. Fallback for events created elsewhere: blue.
+  // Google colorIds — our three offered colors map directly. Anything else
+  // (events created in another client without a color) uses the red default,
+  // matching the reference layout's accent.
   switch (ev.colorId) {
-    case "9": return "blue";
+    case "9":  return "blue";
     case "10": return "green";
-    case "5": return "amber";
-    case "11": return "amber"; // tomato → amber-ish
-    case "2": return "green";  // sage
-    default: return "default";
+    case "5":  return "amber";
+    case "11": return "red";
+    case "2":  return "green";
+    case "4":  return "red";
+    case "6":  return "red";
+    default:   return "red";
   }
 }
 
@@ -448,6 +729,14 @@ function renderCalendar() {
   const gridStart = new Date(y, m, 1 - startWeekday);
   const today = new Date();
 
+  // Short month labels for the inline marker on the first day of next month.
+  const monthShort = (d) => {
+    const s = new Intl.DateTimeFormat("fr-CA", { month: "short" }).format(d);
+    // Trim trailing dot ("mai." → "mai") and capitalize.
+    const trimmed = s.replace(/\.$/, "");
+    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+  };
+
   dom.calGrid.innerHTML = "";
   for (let i = 0; i < 42; i++) {
     const cellDate = new Date(gridStart);
@@ -460,28 +749,45 @@ function renderCalendar() {
     if (isSameDay(cellDate, today)) cell.classList.add("is-today");
     cell.dataset.date = dateKey(cellDate);
 
+    const numRow = document.createElement("div");
+    numRow.className = "cal-cell-num-row";
+
     const num = document.createElement("div");
     num.className = "cal-cell-num";
     num.textContent = String(cellDate.getDate());
-    cell.appendChild(num);
+    numRow.appendChild(num);
+
+    // Inline next-month marker on day 1 of the next month (and on day 1 of
+    // the current month when it's not the first cell of the grid).
+    const isFirstOfMonth = cellDate.getDate() === 1;
+    if (isFirstOfMonth && i > 0) {
+      const lbl = document.createElement("span");
+      lbl.className = "cal-cell-month";
+      lbl.textContent = monthShort(cellDate);
+      numRow.appendChild(lbl);
+    }
+    cell.appendChild(numRow);
 
     const evs = eventsForDay(cellDate);
     if (evs.length) {
-      const dots = document.createElement("div");
-      dots.className = "cal-event-dots";
-      const visible = evs.slice(0, 3);
-      for (const ev of visible) {
-        const dot = document.createElement("span");
-        dot.className = `dot dot--${classifyEventColor(ev)}`;
-        dots.appendChild(dot);
+      const list = document.createElement("div");
+      list.className = "cal-event-list";
+      const showAll = evs.length <= 3;
+      const visibleCount = showAll ? evs.length : 2;
+      for (const ev of evs.slice(0, visibleCount)) {
+        const bar = document.createElement("div");
+        bar.className = `cal-event-bar bar--${classifyEventColor(ev)}`;
+        bar.textContent = ev.summary || "(sans titre)";
+        bar.title = ev.summary || "";
+        list.appendChild(bar);
       }
-      if (evs.length > 3) {
-        const more = document.createElement("span");
+      if (!showAll) {
+        const more = document.createElement("div");
         more.className = "cal-event-more";
-        more.textContent = `+${evs.length - 3}`;
-        dots.appendChild(more);
+        more.textContent = `+${evs.length - visibleCount} autres`;
+        list.appendChild(more);
       }
-      cell.appendChild(dots);
+      cell.appendChild(list);
     }
 
     cell.addEventListener("click", () => openDayPanel(cellDate));
@@ -491,7 +797,7 @@ function renderCalendar() {
 
 async function fetchEventsForViewedMonth() {
   if (!CONFIG.GOOGLE_CLIENT_ID) {
-    showCalendarOverlay(true, "Set GOOGLE_CLIENT_ID in app.js");
+    showCalendarOverlay(true, "Définir GOOGLE_CLIENT_ID dans app.js");
     return;
   }
   const timeMin = new Date(state.viewedYear, state.viewedMonth, 1).toISOString();
@@ -505,6 +811,7 @@ async function fetchEventsForViewedMonth() {
     const data = await gcalFetch(url);
     state.events = data.items || [];
     renderCalendar();
+    renderNotifications();
     if (state.selectedDateKey) {
       const [y, m, d] = state.selectedDateKey.split("-").map(Number);
       renderDayPanelEvents(new Date(y, m - 1, d));
@@ -513,6 +820,47 @@ async function fetchEventsForViewedMonth() {
     if (err.message === "not_authenticated") return;
     console.warn("[calendar] fetch failed:", err);
   }
+}
+
+function renderNotifications() {
+  if (!dom.notifList) return;
+  const now = new Date();
+  const today = startOfDay(now);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const upcoming = state.events
+    .filter(ev => {
+      const s = eventStart(ev);
+      const e = eventEnd(ev) || s;
+      if (!s) return false;
+      // Show events that occur today and haven't ended yet.
+      return s < tomorrow && e >= now;
+    })
+    .sort((a, b) => (eventStart(a)?.getTime() || 0) - (eventStart(b)?.getTime() || 0))
+    .slice(0, CONFIG.NOTIF_MAX);
+
+  if (!upcoming.length) {
+    dom.notifList.innerHTML = `<div class="notif-empty">Aucun événement aujourd'hui</div>`;
+    return;
+  }
+
+  dom.notifList.innerHTML = upcoming.map(ev => {
+    const color = classifyEventColor(ev);
+    const time = ev.start?.date
+      ? "Toute la journée"
+      : (() => {
+          const s = eventStart(ev);
+          return `${pad2(s.getHours())}:${pad2(s.getMinutes())}`;
+        })();
+    const title = (ev.summary || "(sans titre)").replace(/</g, "&lt;");
+    return `
+      <div class="notif notif--${color}">
+        <span class="notif-time">${time}</span>
+        <span class="notif-title">${title}</span>
+      </div>
+    `;
+  }).join("");
 }
 
 function changeMonth(delta) {
@@ -532,13 +880,14 @@ function changeMonth(delta) {
  * ========================================================================= */
 
 function formatDayPanelTitle(d) {
-  return new Intl.DateTimeFormat("en-CA", {
+  const s = new Intl.DateTimeFormat("fr-CA", {
     weekday: "long", month: "long", day: "numeric",
   }).format(d);
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function formatEventTime(ev) {
-  if (ev.start?.date) return "All day";
+  if (ev.start?.date) return "Toute la journée";
   const s = eventStart(ev);
   const e = eventEnd(ev);
   const fmt = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
@@ -551,7 +900,7 @@ function renderDayPanelEvents(d) {
   if (!evs.length) {
     const empty = document.createElement("div");
     empty.className = "day-empty";
-    empty.textContent = "No events.";
+    empty.textContent = "Aucun événement.";
     dom.dayEvents.appendChild(empty);
     return;
   }
@@ -561,7 +910,7 @@ function renderDayPanelEvents(d) {
     row.innerHTML = `
       <span class="day-event-stripe stripe--${classifyEventColor(ev)}"></span>
       <span class="day-event-time">${formatEventTime(ev)}</span>
-      <span class="day-event-title">${(ev.summary || "(untitled)").replace(/</g, "&lt;")}</span>
+      <span class="day-event-title">${(ev.summary || "(sans titre)").replace(/</g, "&lt;")}</span>
     `;
     dom.dayEvents.appendChild(row);
   }
@@ -651,7 +1000,7 @@ async function submitForm(e) {
   if (!state.selectedDateKey) return;
 
   const title = dom.formTitle.value.trim();
-  if (!title) { showFormError("Title is required."); return; }
+  if (!title) { showFormError("Le titre est requis."); return; }
 
   const allDay = dom.formAllday.checked;
   const [y, mo, d] = state.selectedDateKey.split("-").map(Number);
@@ -666,9 +1015,9 @@ async function submitForm(e) {
     const [eh, em] = dom.formEnd.value.split(":").map(Number);
     const startD = new Date(y, mo - 1, d, sh, sm, 0);
     const endD = new Date(y, mo - 1, d, eh, em, 0);
-    if (endD <= startD) { showFormError("End time must be after start time."); return; }
+    if (endD <= startD) { showFormError("L'heure de fin doit être après l'heure de début."); return; }
     start = { dateTime: startD.toISOString(), timeZone: CONFIG.TIMEZONE };
-    end   = { dateTime: endD.toISOString(),   timeZone: CONFIG.TIMEZONE };
+    end = { dateTime: endD.toISOString(), timeZone: CONFIG.TIMEZONE };
   }
 
   const body = {
@@ -687,15 +1036,16 @@ async function submitForm(e) {
     );
     state.events.push(created);
     renderCalendar();
+    renderNotifications();
     const sel = new Date(y, mo - 1, d);
     renderDayPanelEvents(sel);
     hideForm();
   } catch (err) {
     if (err.message === "not_authenticated") {
-      showFormError("Sign in expired — reconnect on the calendar.");
+      showFormError("Session expirée — reconnecter sur le calendrier.");
     } else {
       console.warn("[calendar] create failed:", err);
-      showFormError("Couldn't save — check connection.");
+      showFormError("Impossible d'enregistrer — vérifiez la connexion.");
     }
   } finally {
     dom.formSave.disabled = false;
@@ -741,27 +1091,36 @@ function init() {
   state.viewedYear = now.getFullYear();
   state.viewedMonth = now.getMonth();
 
+  loadPhotoFromStorage();  // restore user-picked photo before first paint
+  applyTheme();            // pick a theme from the fallback hours immediately
   startClock();
   startWeather();
   wireEvents();
+  wirePhotoPicker();
   renderCalendar();
+  renderNotifications();   // initial render with empty events list
 
   if (!CONFIG.GOOGLE_CLIENT_ID) {
-    showCalendarOverlay(true, "Set GOOGLE_CLIENT_ID in app.js");
+    showCalendarOverlay(true, "Définir GOOGLE_CLIENT_ID dans app.js");
     return;
   }
 
   if (loadPersistedToken()) {
     scheduleSilentRefresh();
     fetchEventsForViewedMonth();
-  } else {
-    // Try silent acquisition once GIS is ready; if it fails, show overlay.
-    waitForGis().then(() => {
-      requestToken({ silent: true })
-        .then(() => fetchEventsForViewedMonth())
-        .catch(() => showCalendarOverlay(true));
-    }).catch(() => showCalendarOverlay(true, "Google sign-in script failed to load"));
+    return;
   }
+
+  // No persisted token. Show the Connect overlay right away so the user always
+  // sees the button; silent auth runs in the background and, if it succeeds,
+  // hides the overlay via showCalendarOverlay(false) inside requestToken().
+  showCalendarOverlay(true);
+
+  waitForGis().then(() => {
+    requestToken({ silent: true })
+      .then(() => fetchEventsForViewedMonth())
+      .catch(() => { /* overlay already visible */ });
+  }).catch(() => showCalendarOverlay(true, "Échec du chargement de Google Sign-In"));
 }
 
 function waitForGis(timeoutMs = 5000) {
