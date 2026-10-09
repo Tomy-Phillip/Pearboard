@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="fr-CA">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=1920,initial-scale=1,user-scalable=no" />
@@ -7,9 +8,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" />
+    href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" />
   <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
   <main class="grid">
 
@@ -18,8 +20,9 @@
 
       <button class="photo-settings" id="photo-settings" aria-label="Modifier la photo de fond" aria-haspopup="menu">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <path d="M3 6.5h2.5L7 4.5h6L14.5 6.5H17v9.5H3V6.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-          <circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M3 6.5h2.5L7 4.5h6L14.5 6.5H17v9.5H3V6.5Z" stroke="currentColor" stroke-width="1.6"
+            stroke-linejoin="round" />
+          <circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="1.6" />
         </svg>
       </button>
 
@@ -37,21 +40,24 @@
         </div>
 
         <section class="notifications" id="notifications" aria-live="polite">
-          <div class="notif-label">Aujourd'hui</div>
+          <div class="notif-label">Aujourd'huiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii</div>
           <div class="notif-list" id="notif-list">
             <div class="notif-empty">—</div>
           </div>
         </section>
 
         <div class="weather-bottom">
-          <div id="weather" class="weather-overlay" role="button" tabindex="0" aria-label="Toucher pour actualiser la météo">
+          <div id="weather" class="weather-overlay" role="button" tabindex="0"
+            aria-label="Toucher pour actualiser la météo">
             <div class="weather-overlay-main">
               <div class="weather-temp" id="weather-temp">—°</div>
               <div class="weather-icon" id="weather-icon" aria-hidden="true"></div>
             </div>
             <div class="weather-overlay-stats">
-              <span class="weather-overlay-stat"><span class="weather-overlay-stat-label">Max</span><span id="weather-max">—°</span></span>
-              <span class="weather-overlay-stat"><span class="weather-overlay-stat-label">Min</span><span id="weather-min">—°</span></span>
+              <span class="weather-overlay-stat"><span class="weather-overlay-stat-label">Max</span><span
+                  id="weather-max">—°</span></span>
+              <span class="weather-overlay-stat"><span class="weather-overlay-stat-label">Min</span><span
+                  id="weather-min">—°</span></span>
             </div>
             <span class="weather-overlay-desc" id="weather-desc">&nbsp;</span>
           </div>
@@ -127,4 +133,5 @@
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="app.js" defer></script>
 </body>
+
 </html>
