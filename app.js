@@ -34,6 +34,9 @@ const CONFIG = {
   THEME_AUTO: true,
   THEME_DAY_START: 7,   // hour, fallback only
   THEME_DAY_END: 19,    // hour, fallback only
+
+  // Auto-reload when update.sh deploys a new commit (it writes version.txt).
+  UPDATE_CHECK_MS: 60 * 1000,
 };
 
 /* =========================================================================
@@ -1083,6 +1086,35 @@ function wireEvents() {
 }
 
 /* =========================================================================
+ * Auto-update
+ * ========================================================================= */
+
+async function fetchDeployedVersion() {
+  try {
+    const r = await fetch("version.txt", { cache: "no-store" });
+    if (!r.ok) return null;
+    return (await r.text()).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function startUpdateWatcher() {
+  let loadedVersion = null;
+  fetchDeployedVersion().then(v => { loadedVersion = v; });
+
+  setInterval(async () => {
+    const v = await fetchDeployedVersion();
+    if (!v) return;
+    if (!loadedVersion) { loadedVersion = v; return; }
+    if (v === loadedVersion) return;
+    // Don't yank the page away while someone is reading or typing in the day panel.
+    if (!dom.dayPanel.classList.contains("hidden")) return;
+    location.reload();
+  }, CONFIG.UPDATE_CHECK_MS);
+}
+
+/* =========================================================================
  * Boot
  * ========================================================================= */
 
@@ -1099,6 +1131,7 @@ function init() {
   wirePhotoPicker();
   renderCalendar();
   renderNotifications();   // initial render with empty events list
+  startUpdateWatcher();
 
   if (!CONFIG.GOOGLE_CLIENT_ID) {
     showCalendarOverlay(true, "Définir GOOGLE_CLIENT_ID dans app.js");

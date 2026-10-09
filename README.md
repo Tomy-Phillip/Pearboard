@@ -2,7 +2,7 @@
 
 A fullscreen dashboard for a Raspberry Pi 4 with a 15.6" 1920×1080 landscape touchscreen. Shows a live clock, current weather (Open-Meteo, Montréal), and a month-view calendar backed by Google Calendar. Touch to change months, see a day's events, and add new events that go straight to your Google Calendar.
 
-Pure static HTML/CSS/JS served by a tiny Python HTTP server on `http://localhost:8000` (the localhost origin is what unblocks Google OAuth — `file://` is rejected by Google's sign-in).
+Pure static HTML/CSS/JS served by a tiny Python HTTP server (`server.py`) on `http://localhost:8000` (the localhost origin is what unblocks Google OAuth — `file://` is rejected by Google's sign-in).
 
 ## What's in the box
 
@@ -11,8 +11,11 @@ Pure static HTML/CSS/JS served by a tiny Python HTTP server on `http://localhost
 | `index.html`        | Markup, font + GIS script tags                                         |
 | `style.css`         | Theme tokens, grid layout, all widget styles                           |
 | `app.js`            | Clock, weather, calendar grid, GIS auth, day panel, add-event form     |
-| `dashboard.service` | systemd unit that runs `python3 -m http.server 8000`                   |
-| `setup.sh`          | Idempotent installer: enables the service, wires Chromium kiosk launch |
+| `server.py`         | Static server on `127.0.0.1:8000`, sends `Cache-Control: no-cache`     |
+| `dashboard.service` | systemd unit that runs `server.py`                                     |
+| `update.sh`         | Pulls `origin/main` from GitHub, reinstalls changed units              |
+| `pearboard-update.*`| systemd timer + service that run `update.sh` every 5 minutes           |
+| `setup.sh`          | Idempotent installer: services, update timer, Chromium kiosk launch    |
 
 ## One-time Google Cloud setup
 
@@ -37,17 +40,32 @@ You need an OAuth Client ID before the calendar widget will work. The clock and 
 
 ## Install on the Pi
 
-```bash
-# On your dev machine: copy the repo to the Pi
-rsync -avz --exclude '.git' ./ tomy@raspberrypi.local:/home/tomy/Pearboard/
+The repo is private, so the Pi gets a read-only **deploy key** to clone and pull it.
 
-# On the Pi
+```bash
+# On the Pi: create a key dedicated to this repo
 ssh tomy@raspberrypi.local
+ssh-keygen -t ed25519 -f ~/.ssh/pearboard_deploy -N "" -C "pearboard-pi"
+cat >> ~/.ssh/config <<'EOF'
+Host github.com
+  IdentityFile ~/.ssh/pearboard_deploy
+  IdentitiesOnly yes
+EOF
+cat ~/.ssh/pearboard_deploy.pub
+```
+
+On GitHub: **Pearboard repo → Settings → Deploy keys → Add deploy key**, paste the public key, leave **Allow write access** unchecked.
+
+```bash
+# Back on the Pi (answer "yes" to GitHub's host-key prompt)
+git clone git@github.com:Tomy-Phillip/Pearboard.git /home/tomy/Pearboard
 cd /home/tomy/Pearboard
 chmod +x setup.sh
 ./setup.sh
 sudo reboot
 ```
+
+If the Pi already has an `rsync`'d copy without `.git`, move it aside (`mv ~/Pearboard ~/Pearboard.old`) and clone fresh.
 
 After reboot, Chromium should launch in kiosk mode and load the dashboard. The first time you tap the calendar's **Connect** button, you'll go through Google's consent screen once. After that, silent token refresh keeps the calendar working indefinitely on a continuously-running kiosk.
 
@@ -67,12 +85,25 @@ sudo systemctl enable --now dashboard.service
 
 ## Updating
 
-Edit a file, copy it to the Pi, and either reload the page (Ctrl+R if you have a keyboard, or `pkill chromium && systemctl --user restart graphical-session`) or just reboot. No build step.
+Just `git push` to `main`. No build step, no need to reach the Pi:
+
+1. Every 5 minutes, `pearboard-update.timer` runs `update.sh`, which fetches `origin/main` and does a `git reset --hard` onto it. Local edits made on the Pi are discarded. If `dashboard.service` or the update units changed, it reinstalls them; if `server.py` changed, it restarts the server.
+2. `update.sh` writes the new commit SHA to `version.txt`.
+3. The page polls `version.txt` every minute and reloads itself when the SHA changes. It waits if the day panel is open, so a reload never interrupts typing an event.
+
+So a push shows up on screen within about 6 minutes. To force it right away:
 
 ```bash
-rsync -avz --exclude '.git' ./ tomy@raspberrypi.local:/home/tomy/Pearboard/
-ssh tomy@raspberrypi.local 'sudo systemctl restart dashboard.service'
+ssh tomy@raspberrypi.local 'sudo systemctl start pearboard-update.service'
 ```
+
+Check what happened: `journalctl -u pearboard-update.service -n 50`.
+
+Changes to `setup.sh` itself (e.g. the Chromium autostart line) are **not** re-applied automatically; re-run `./setup.sh` on the Pi for those.
+
+### Reaching the Pi from outside your home network
+
+Optional, for SSH/logs when you're away: install [Tailscale](https://tailscale.com/download/linux) on the Pi (`curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`) and on your PC. Then `ssh tomy@<pi-tailscale-name>` works from anywhere, with no port forwarding.
 
 ## Troubleshooting
 

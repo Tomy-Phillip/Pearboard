@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=tomy
 WorkingDirectory=/home/tomy/Pearboard
-ExecStart=/usr/bin/python3 -m http.server 8000 --bind 127.0.0.1
+ExecStart=/usr/bin/python3 /home/tomy/Pearboard/server.py
 Restart=always
 RestartSec=3
 

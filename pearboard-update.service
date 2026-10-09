@@ -1,0 +1,8 @@
+[Unit]
+Description=Pearboard auto-update from GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /home/tomy/Pearboard/update.sh
