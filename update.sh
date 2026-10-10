@@ -13,12 +13,19 @@ UNITS=(dashboard.service pearboard-update.service pearboard-update.timer)
 as_tomy() { runuser -u tomy -- "$@"; }
 git_dash() { as_tomy git -C "$DASH_DIR" "$@"; }
 
+# The page polls version.txt and reloads itself when it changes.
+write_version() { as_tomy sh -c "echo '$1' > '$DASH_DIR/version.txt'"; }
+
 git_dash fetch --quiet origin "$BRANCH"
 
 old="$(git_dash rev-parse HEAD)"
 new="$(git_dash rev-parse "origin/$BRANCH")"
 
 if [[ "$old" == "$new" ]]; then
+  # Covers a manual `git pull` on the Pi: the checkout moved but nobody told the page.
+  if [[ "$(cat "$DASH_DIR/version.txt" 2>/dev/null)" != "$old" ]]; then
+    write_version "$old"
+  fi
   exit 0
 fi
 
@@ -42,5 +49,4 @@ if grep -qxE "server\.py|dashboard\.service" <<<"$changed"; then
   systemctl restart dashboard.service
 fi
 
-# The page polls this file and reloads itself when it changes.
-as_tomy sh -c "echo '$new' > '$DASH_DIR/version.txt'"
+write_version "$new"
