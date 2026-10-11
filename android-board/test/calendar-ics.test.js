@@ -6,31 +6,7 @@ process.env.TZ = "America/Toronto";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const CalendarIcs = require("../app/src/main/assets/web/calendar-ics.js");
-
-const VTIMEZONE = [
-  "BEGIN:VTIMEZONE",
-  "TZID:America/Toronto",
-  "BEGIN:DAYLIGHT",
-  "TZOFFSETFROM:-0500",
-  "TZOFFSETTO:-0400",
-  "TZNAME:EDT",
-  "DTSTART:19700308T020000",
-  "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU",
-  "END:DAYLIGHT",
-  "BEGIN:STANDARD",
-  "TZOFFSETFROM:-0400",
-  "TZOFFSETTO:-0500",
-  "TZNAME:EST",
-  "DTSTART:19701101T020000",
-  "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU",
-  "END:STANDARD",
-  "END:VTIMEZONE",
-].join("\r\n");
-
-const vevent = (...lines) => ["BEGIN:VEVENT", ...lines, "END:VEVENT"].join("\r\n");
-const ics = (...events) =>
-  ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//pearboard//test//EN", VTIMEZONE, ...events, "END:VCALENDAR"]
-    .join("\r\n");
+const { vevent, ics, withWarnings } = require("./ics-fixtures.js");
 
 const OCT_START = new Date(2026, 9, 1);
 const OCT_END = new Date(2026, 10, 1);
@@ -148,4 +124,173 @@ test("results are sorted by start", () => {
 
 test("non-iCalendar text throws", () => {
   assert.throws(() => CalendarIcs.parse("<html>Not found</html>"));
+});
+
+test("exception without a master (invited to one instance) is kept", () => {
+  const evs = october(ics(
+    vevent(
+      "UID:orphan", "SUMMARY:Invité",
+      "RECURRENCE-ID;TZID=America/Toronto:20261008T120000",
+      "DTSTART;TZID=America/Toronto:20261008T120000",
+      "DTEND;TZID=America/Toronto:20261008T130000",
+    ),
+    vevent(
+      "UID:orphan-cancelled", "SUMMARY:Annulé", "STATUS:CANCELLED",
+      "RECURRENCE-ID;TZID=America/Toronto:20261009T120000",
+      "DTSTART;TZID=America/Toronto:20261009T120000",
+      "DTEND;TZID=America/Toronto:20261009T130000",
+    ),
+  ));
+  assert.deepEqual(evs, [{
+    summary: "Invité",
+    start: { dateTime: "2026-10-08T16:00:00.000Z" },
+    end: { dateTime: "2026-10-08T17:00:00.000Z" },
+  }]);
+});
+
+test("occurrence moved into the range from weeks later is found", () => {
+  const evs = october(ics(
+    vevent(
+      "UID:m", "SUMMARY:Mensuel",
+      "DTSTART;TZID=America/Toronto:20261001T120000",
+      "DTEND;TZID=America/Toronto:20261001T130000",
+      "RRULE:FREQ=MONTHLY;COUNT=3",
+    ),
+    vevent(
+      "UID:m", "SUMMARY:Avancé",
+      "RECURRENCE-ID;TZID=America/Toronto:20261201T120000",
+      "DTSTART;TZID=America/Toronto:20261030T120000",
+      "DTEND;TZID=America/Toronto:20261030T130000",
+    ),
+  ));
+  assert.deepEqual(evs.map(e => [e.summary, e.start.dateTime]), [
+    ["Mensuel", "2026-10-01T16:00:00.000Z"],
+    ["Avancé", "2026-10-30T16:00:00.000Z"],
+  ]);
+});
+
+test("occurrence moved out of the range (earlier) is not shown", () => {
+  const evs = october(ics(
+    vevent(
+      "UID:m2", "SUMMARY:Mensuel",
+      "DTSTART;TZID=America/Toronto:20260901T120000",
+      "DTEND;TZID=America/Toronto:20260901T130000",
+      "RRULE:FREQ=MONTHLY;COUNT=2",
+    ),
+    vevent(
+      "UID:m2", "SUMMARY:Reculé",
+      "RECURRENCE-ID;TZID=America/Toronto:20261001T120000",
+      "DTSTART;TZID=America/Toronto:20260929T120000",
+      "DTEND;TZID=America/Toronto:20260929T130000",
+    ),
+  ));
+  assert.deepEqual(evs, []);
+});
+
+test("a malformed VEVENT is skipped without hiding the others", () => {
+  const { result: evs, warnings } = withWarnings(() => october(ics(
+    vevent("UID:broken", "SUMMARY:Cassé"),
+    vevent("UID:broken-rec", "SUMMARY:Cassé aussi", "RRULE:FREQ=DAILY"),
+    vevent("UID:ok", "SUMMARY:OK", "DTSTART;VALUE=DATE:20261012", "DTEND;VALUE=DATE:20261013"),
+  )));
+  assert.deepEqual(evs.map(e => e.summary), ["OK"]);
+  assert.ok(warnings.length >= 1, "a warning is logged for the broken event");
+});
+
+test("a broken event warns once, not on every between() call", () => {
+  const { warnings } = withWarnings(() => {
+    const cal = CalendarIcs.parse(ics(vevent("UID:broken2", "SUMMARY:Cassé", "RRULE:FREQ=DAILY")));
+    cal.between(OCT_START, OCT_END);
+    cal.between(OCT_START, OCT_END);
+    cal.between(new Date(2026, 10, 1), new Date(2026, 11, 1));
+  });
+  assert.equal(warnings.length, 1);
+});
+
+test("weekly all-day recurrence: last day included, rangeEnd's day excluded", () => {
+  const evs = october(ics(vevent(
+    "UID:we", "SUMMARY:Week-end",
+    "DTSTART;VALUE=DATE:20261003", "DTEND;VALUE=DATE:20261004",
+    "RRULE:FREQ=WEEKLY;BYDAY=SA,SU",
+  )));
+  assert.deepEqual(evs.map(e => [e.start.date, e.end.date]), [
+    ["2026-10-03", "2026-10-04"],
+    ["2026-10-04", "2026-10-05"],
+    ["2026-10-10", "2026-10-11"],
+    ["2026-10-11", "2026-10-12"],
+    ["2026-10-17", "2026-10-18"],
+    ["2026-10-18", "2026-10-19"],
+    ["2026-10-24", "2026-10-25"],
+    ["2026-10-25", "2026-10-26"],
+    ["2026-10-31", "2026-11-01"],
+  ]);
+});
+
+test("all-day event without DTEND lasts one day", () => {
+  const evs = october(ics(vevent("UID:nd", "SUMMARY:Jour", "DTSTART;VALUE=DATE:20261010")));
+  assert.deepEqual(evs, [{ summary: "Jour", start: { date: "2026-10-10" }, end: { date: "2026-10-11" } }]);
+});
+
+test("timed event without DTEND is zero-length and kept at its start", () => {
+  const evs = october(ics(vevent("UID:zl", "SUMMARY:Rappel", "DTSTART:20261010T150000Z")));
+  assert.deepEqual(evs, [{
+    summary: "Rappel",
+    start: { dateTime: "2026-10-10T15:00:00.000Z" },
+    end: { dateTime: "2026-10-10T15:00:00.000Z" },
+  }]);
+});
+
+test("recurring occurrence starting before the range but overlapping it is included", () => {
+  const evs = october(ics(vevent(
+    "UID:ov", "SUMMARY:Camp",
+    "DTSTART;VALUE=DATE:20260930", "DTEND;VALUE=DATE:20261003",
+    "RRULE:FREQ=WEEKLY;COUNT=2",
+  )));
+  assert.deepEqual(evs.map(e => [e.start.date, e.end.date]), [
+    ["2026-09-30", "2026-10-03"],
+    ["2026-10-07", "2026-10-10"],
+  ]);
+});
+
+// A busy feed: decades-old daily and weekly series, as Google keeps them forever.
+function busyFeed() {
+  const events = [];
+  for (let i = 0; i < 10; i++) {
+    events.push(vevent(
+      `UID:daily${i}`, `SUMMARY:Daily ${i}`,
+      "DTSTART;TZID=America/Toronto:20160101T080000",
+      "DTEND;TZID=America/Toronto:20160101T083000",
+      "RRULE:FREQ=DAILY",
+    ));
+  }
+  for (let i = 0; i < 20; i++) {
+    events.push(vevent(
+      `UID:weekly${i}`, `SUMMARY:Weekly ${i}`,
+      "DTSTART;TZID=America/Toronto:20100104T180000",
+      "DTEND;TZID=America/Toronto:20100104T190000",
+      "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR",
+    ));
+  }
+  return ics(...events);
+}
+
+test("between() reuses expanded occurrences across calls", () => {
+  const text = busyFeed();
+  const sept = [new Date(2026, 8, 1), new Date(2026, 9, 1)];
+  const nov = [new Date(2026, 10, 1), new Date(2026, 11, 1)];
+
+  const cal = CalendarIcs.parse(text);
+  cal.between(OCT_START, OCT_END);
+  const t0 = performance.now();
+  const novEvs = cal.between(...nov);
+  const elapsed = performance.now() - t0;
+  // Re-walking from DTSTART took ~2.5 s here; extending the cache by a month takes ~20 ms.
+  // 100 ms leaves a wide margin against slow machines while still catching a regression.
+  assert.ok(elapsed < 100, `second between() took ${elapsed.toFixed(1)} ms`);
+
+  // Cached results match a fresh parse, including an earlier range after a later one.
+  assert.deepEqual(novEvs, CalendarIcs.parse(text).between(...nov));
+  assert.deepEqual(cal.between(...sept), CalendarIcs.parse(text).between(...sept));
+  assert.deepEqual(cal.between(OCT_START, OCT_END), CalendarIcs.parse(text).between(OCT_START, OCT_END));
+  assert.equal(novEvs.length, 30 * 10 + 20 * 13);
 });
