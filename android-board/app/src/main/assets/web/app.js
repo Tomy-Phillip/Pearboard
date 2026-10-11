@@ -8,6 +8,9 @@ const CONFIG = {
   // Proxied by MainActivity (IcsProxy) — the secret iCal address never reaches JS.
   ICS_URL: "/calendar.ics",
   ICS_REFRESH_MS: 10 * 60 * 1000,
+  // Backstop for a worker that never answers; the first parse of a real feed
+  // takes a few seconds on a Fire TV, so this is far above any honest call.
+  WORKER_TIMEOUT_MS: 60 * 1000,
 
   WEATHER_URL:
     "https://api.open-meteo.com/v1/forecast" +
@@ -414,8 +417,31 @@ function startWeather() {
  * ========================================================================= */
 
 let calendarWorker = null;
-const workerPending = new Map(); // id → { resolve, reject }
+const workerPending = new Map(); // id → { resolve, reject, timer }
 let workerNextId = 1;
+
+// The worker itself broke (script failed to load, crashed, stopped answering),
+// as opposed to the worker rejecting a bad feed. Shown as "Erreur du calendrier".
+function workerFailure(message) {
+  const err = new Error(message);
+  err.workerFailure = true;
+  return err;
+}
+
+// Drops a broken worker so the next call starts a fresh one. The fresh worker
+// holds no feed, so the calendar counts as not loaded until the next fetch.
+function recycleCalendarWorker(err) {
+  if (calendarWorker) {
+    calendarWorker.terminate();
+    calendarWorker = null;
+  }
+  state.hasCalendar = false;
+  workerPending.forEach((p) => {
+    clearTimeout(p.timer);
+    p.reject(err);
+  });
+  workerPending.clear();
+}
 
 function getCalendarWorker() {
   if (calendarWorker) return calendarWorker;
@@ -425,23 +451,33 @@ function getCalendarWorker() {
     const p = workerPending.get(msg.id);
     if (!p) return;
     workerPending.delete(msg.id);
+    clearTimeout(p.timer);
     if (msg.ok) p.resolve(msg.result);
     else p.reject(new Error(msg.error || "worker_error"));
   };
   calendarWorker.onerror = (e) => {
     console.warn("[calendar] worker error:", e.message || e);
-    const err = new Error("worker_error: " + (e.message || "unknown"));
-    workerPending.forEach((p) => p.reject(err));
-    workerPending.clear();
+    recycleCalendarWorker(workerFailure("worker_error: " + (e.message || "unknown")));
   };
   return calendarWorker;
 }
 
 function callWorker(msg) {
   return new Promise((resolve, reject) => {
+    let worker;
+    try {
+      worker = getCalendarWorker();
+    } catch (e) {
+      reject(workerFailure("worker_start: " + e));
+      return;
+    }
     const id = workerNextId++;
-    workerPending.set(id, { resolve, reject });
-    getCalendarWorker().postMessage(Object.assign({ id }, msg));
+    const timer = setTimeout(() => {
+      console.warn("[calendar] worker timed out on", msg.type);
+      recycleCalendarWorker(workerFailure("worker_timeout"));
+    }, CONFIG.WORKER_TIMEOUT_MS);
+    workerPending.set(id, { resolve, reject, timer });
+    worker.postMessage(Object.assign({ id }, msg));
   });
 }
 
@@ -476,28 +512,46 @@ function refreshEventsFromCalendar() {
   const seq = ++state.refreshSeq;
   renderCalendar();
   renderNotifications();
-  if (!state.hasCalendar) return Promise.resolve();
+  if (!state.hasCalendar) return;
 
   const grid = gridRange(state.viewedYear, state.viewedMonth);
   const today = startOfDay(new Date());
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  return callWorker({
-    type: "between",
-    ranges: [
-      [grid[0].getTime(), grid[1].getTime()],
-      [today.getTime(), tomorrow.getTime()],
-    ],
-  }).then((result) => {
+  requestExpansion(seq, [
+    [grid[0].getTime(), grid[1].getTime()],
+    [today.getTime(), tomorrow.getTime()],
+  ]);
+}
+
+/* Latest wins: at most one "between" is in flight. Holding a direction key on a
+ * slow device would otherwise queue an expansion per month skimmed past; instead
+ * only the newest request waits, and goes out when the in-flight one returns. */
+const expansion = { busy: false, next: null }; // next: { seq, ranges }
+
+function requestExpansion(seq, ranges) {
+  if (expansion.busy) {
+    expansion.next = { seq, ranges };
+    return;
+  }
+  expansion.busy = true;
+  callWorker({ type: "between", ranges }).then((result) => {
     if (seq !== state.refreshSeq) return; // a newer refresh (month change) superseded us
     state.events = result[0];
     state.todayEvents = result[1];
     renderCalendar();
     renderNotifications();
     if (state.selectedDateKey) renderDayPanelEvents(parseDateKey(state.selectedDateKey));
-  }).catch((err) => {
+  }, (err) => {
     console.warn("[calendar] expansion failed:", err);
+    if (err.workerFailure) showCalendarOverlay(true, "Erreur du calendrier");
+  }).then(() => {
+    expansion.busy = false;
+    const next = expansion.next;
+    expansion.next = null;
+    // After a worker failure there's no feed to expand; the next fetch reloads one.
+    if (next && state.hasCalendar) requestExpansion(next.seq, next.ranges);
   });
 }
 
@@ -545,9 +599,13 @@ async function fetchCalendar() {
     showCalendarOverlay(false);
   } catch (err) {
     console.warn("[calendar] fetch failed:", err);
-    state.icsOffline = true;
-    if (state.hasCalendar) showCalendarOverlay(false);
-    else showCalendarOverlay(true, "Calendrier hors ligne");
+    if (err.workerFailure) {
+      if (!state.hasCalendar) showCalendarOverlay(true, "Erreur du calendrier");
+    } else {
+      state.icsOffline = true;
+      if (state.hasCalendar) showCalendarOverlay(false);
+      else showCalendarOverlay(true, "Calendrier hors ligne");
+    }
   } finally {
     renderCalendarStatus();
   }
