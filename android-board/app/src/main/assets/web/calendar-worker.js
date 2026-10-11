@@ -12,7 +12,9 @@ self.onmessage = function (e) {
   const msg = e.data;
   if (msg.type === "load") {
     // Same text as last time (the usual 10-minute refresh): keep the warm cache.
-    if (msg.text !== lastText) {
+    // `changed` tells app.js whether the feed needs writing to localStorage again.
+    const changed = msg.text !== lastText;
+    if (changed) {
       try {
         calendar = CalendarIcs.parse(msg.text);
         lastText = msg.text;
@@ -21,7 +23,7 @@ self.onmessage = function (e) {
         return;
       }
     }
-    self.postMessage({ id: msg.id, ok: true });
+    self.postMessage({ id: msg.id, ok: true, result: { changed: changed } });
   } else if (msg.type === "between") {
     let result;
     try {

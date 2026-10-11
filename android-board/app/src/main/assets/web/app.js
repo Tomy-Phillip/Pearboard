@@ -121,8 +121,9 @@ const lsGet = (k) => {
   catch (e) { return null; }
 };
 
+// Returns false when the write failed (quota, storage disabled); most callers ignore it.
 const lsSet = (k, v) => {
-  try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { }
+  try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; }
 };
 
 /* =========================================================================
@@ -556,12 +557,14 @@ function requestExpansion(seq, ranges) {
 }
 
 // Rejects on an invalid feed and leaves the previously loaded calendar in place.
+// Resolves with whether the text differs from what the worker already held.
 function loadIcsText(text, fetchedAt) {
-  return callWorker({ type: "load", text }).then(() => {
+  return callWorker({ type: "load", text }).then((result) => {
     state.hasCalendar = true;
     state.icsFetchedAt = fetchedAt;
     renderCalendarStatus();
     refreshEventsFromCalendar();
+    return result.changed;
   });
 }
 
@@ -593,8 +596,13 @@ async function fetchCalendar() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const text = await r.text();
     const fetchedAt = Date.now();
-    await loadIcsText(text, fetchedAt);
-    lsSet("ics_last", { text, fetchedAt });
+    const changed = await loadIcsText(text, fetchedAt);
+    // The feed can be several MB: rewrite it only when it changed, and keep the
+    // timestamp under its own small key so the offline age stays right.
+    if (changed && !lsSet("ics_text", text)) {
+      console.warn("[calendar] could not cache the feed (storage full?)");
+    }
+    lsSet("ics_fetched_at", fetchedAt);
     state.icsOffline = false;
     showCalendarOverlay(false);
   } catch (err) {
@@ -615,9 +623,9 @@ function startCalendar() {
   // Show the last good feed right away; the fresh fetch replaces it when it lands.
   // The first fetch waits for the cached load to settle, so an offline start
   // doesn't flash "Calendrier hors ligne" before the cached calendar shows.
-  const cached = lsGet("ics_last");
-  const cachedLoaded = cached && cached.text
-    ? loadIcsText(cached.text, cached.fetchedAt)
+  const cachedText = lsGet("ics_text");
+  const cachedLoaded = cachedText
+    ? loadIcsText(cachedText, lsGet("ics_fetched_at") || 0)
       .then(() => showCalendarOverlay(false))
       .catch((err) => console.warn("[calendar] cached feed unusable:", err))
     : Promise.resolve();
