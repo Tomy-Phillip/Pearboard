@@ -18,21 +18,6 @@
     <section id="clock" class="widget widget--clock">
       <div class="clock-photo" aria-hidden="true"></div>
 
-      <button class="photo-settings" id="photo-settings" aria-label="Modifier la photo de fond" aria-haspopup="menu">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <path d="M3 6.5h2.5L7 4.5h6L14.5 6.5H17v9.5H3V6.5Z" stroke="currentColor" stroke-width="1.6"
-            stroke-linejoin="round" />
-          <circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="1.6" />
-        </svg>
-      </button>
-
-      <div class="photo-menu hidden" id="photo-menu" role="menu">
-        <button type="button" class="photo-menu-btn" id="photo-choose" role="menuitem">Choisir une photo</button>
-        <button type="button" class="photo-menu-btn" id="photo-reset" role="menuitem">Réinitialiser</button>
-      </div>
-
-      <input type="file" id="photo-input" accept="image/*" hidden />
-
       <div class="clock-overlay">
         <div class="clock-top">
           <div class="clock-date" id="clock-date">&nbsp;</div>
@@ -40,7 +25,7 @@
         </div>
 
         <section class="notifications" id="notifications" aria-live="polite">
-          <div class="notif-label">Aujourd'hui titi</div>
+          <div class="notif-label">Aujourd'hui</div>
           <div class="notif-list" id="notif-list">
             <div class="notif-empty">—</div>
           </div>
@@ -69,7 +54,10 @@
     <section id="calendar" class="widget widget--calendar">
       <header class="cal-header">
         <button class="cal-nav" id="cal-prev" aria-label="Mois précédent">&larr;</button>
-        <h2 class="cal-title" id="cal-title">&nbsp;</h2>
+        <div class="cal-title-wrap">
+          <h2 class="cal-title" id="cal-title">&nbsp;</h2>
+          <div class="cal-status hidden" id="cal-status"></div>
+        </div>
         <button class="cal-nav" id="cal-next" aria-label="Mois suivant">&rarr;</button>
       </header>
       <div class="cal-weekdays">
@@ -79,8 +67,7 @@
 
       <div class="cal-overlay hidden" id="cal-overlay">
         <div class="cal-overlay-inner">
-          <div class="cal-overlay-msg" id="cal-overlay-msg">Connecter Google Calendar</div>
-          <button class="btn btn--primary" id="cal-connect">Connecter</button>
+          <div class="cal-overlay-msg" id="cal-overlay-msg">Chargement du calendrier…</div>
         </div>
       </div>
     </section>
@@ -92,45 +79,9 @@
       <h3 class="day-panel-title" id="day-panel-title">&nbsp;</h3>
       <button class="day-panel-close" id="day-panel-close" aria-label="Fermer">&times;</button>
     </header>
-    <button class="btn btn--ghost btn--add" id="day-add">+ Ajouter un événement</button>
     <div class="day-events" id="day-events"></div>
-
-    <form class="day-form hidden" id="day-form" autocomplete="off">
-      <label class="form-row">
-        <span class="form-label">Titre</span>
-        <input type="text" id="form-title" required maxlength="200" />
-      </label>
-      <label class="form-row form-row--toggle">
-        <span class="form-label">Toute la journée</span>
-        <input type="checkbox" id="form-allday" />
-      </label>
-      <div class="form-row form-row--times" id="form-times-row">
-        <label class="form-half">
-          <span class="form-label">Début</span>
-          <input type="time" id="form-start" required />
-        </label>
-        <label class="form-half">
-          <span class="form-label">Fin</span>
-          <input type="time" id="form-end" required />
-        </label>
-      </div>
-      <div class="form-row">
-        <span class="form-label">Couleur</span>
-        <div class="form-colors">
-          <button type="button" class="swatch swatch--blue is-selected" data-color="blue" aria-label="Bleu"></button>
-          <button type="button" class="swatch swatch--green" data-color="green" aria-label="Vert"></button>
-          <button type="button" class="swatch swatch--amber" data-color="amber" aria-label="Ambre"></button>
-        </div>
-      </div>
-      <div class="form-error hidden" id="form-error"></div>
-      <div class="form-actions">
-        <button type="button" class="btn btn--ghost" id="form-cancel">Annuler</button>
-        <button type="submit" class="btn btn--primary" id="form-save">Enregistrer</button>
-      </div>
-    </form>
   </div>
 
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="app.js" defer></script>
 </body>
 

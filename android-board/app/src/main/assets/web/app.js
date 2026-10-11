@@ -5,10 +5,9 @@
  * ========================================================================= */
 
 const CONFIG = {
-  // Paste your OAuth 2.0 Client ID here. See README for setup steps.
-  GOOGLE_CLIENT_ID: "20853608947-labdcj4jdph1ec0dg02pn2t3dbjej1hc.apps.googleusercontent.com",
-  GOOGLE_SCOPE: "https://www.googleapis.com/auth/calendar.events",
-  CALENDAR_ID: "primary",
+  // Proxied by MainActivity (IcsProxy) — the secret iCal address never reaches JS.
+  ICS_URL: "/calendar.ics",
+  ICS_REFRESH_MS: 10 * 60 * 1000,
 
   WEATHER_URL:
     "https://api.open-meteo.com/v1/forecast" +
@@ -25,18 +24,11 @@ const CONFIG = {
   WEATHER_TAP_DEBOUNCE_MS: 10 * 1000,
   WEATHER_STALE_MS: 6 * 60 * 60 * 1000,
 
-  TOKEN_REFRESH_BEFORE_MS: 5 * 60 * 1000, // refresh 5 min before expiry
-
-  TIMEZONE: "America/Toronto",
-
   // Auto theme — light during the day, dark at night. Driven by Open-Meteo
   // sunrise/sunset when available, otherwise these fixed hours.
   THEME_AUTO: true,
   THEME_DAY_START: 7,   // hour, fallback only
   THEME_DAY_END: 19,    // hour, fallback only
-
-  // Auto-reload when update.sh deploys a new commit (it writes version.txt).
-  UPDATE_CHECK_MS: 60 * 1000,
 };
 
 /* =========================================================================
@@ -46,7 +38,13 @@ const CONFIG = {
 const state = {
   viewedYear: 0,
   viewedMonth: 0, // 0-11
-  events: [],     // Google Calendar events for the viewed month
+  events: [],      // occurrences overlapping the 42-day grid of the viewed month
+  todayEvents: [], // today's occurrences, for the "Aujourd'hui" list
+  hasCalendar: false, // the worker holds a successfully parsed feed
+  icsFetchedAt: 0,
+  icsOffline: false,
+  focusedDateKey: null, // 'YYYY-MM-DD' of the D-pad focused cell
+  refreshSeq: 0,   // drops worker replies for a month we've already left
   weather: null,
   weatherFetchedAt: 0,
   weatherRefreshing: false,
@@ -57,13 +55,6 @@ const state = {
   sunrise: null,  // ISO string
   sunset: null,   // ISO string
   appliedTheme: null,
-
-  auth: {
-    tokenClient: null,
-    accessToken: null,
-    expiresAt: 0,
-    refreshTimer: null,
-  },
 };
 
 /* =========================================================================
@@ -86,36 +77,18 @@ const dom = {
 
   notifList: $("notif-list"),
 
-  photoSettings: $("photo-settings"),
-  photoMenu: $("photo-menu"),
-  photoChoose: $("photo-choose"),
-  photoReset: $("photo-reset"),
-  photoInput: $("photo-input"),
-
   calTitle: $("cal-title"),
+  calStatus: $("cal-status"),
   calPrev: $("cal-prev"),
   calNext: $("cal-next"),
   calGrid: $("cal-grid"),
   calOverlay: $("cal-overlay"),
   calOverlayMsg: $("cal-overlay-msg"),
-  calConnect: $("cal-connect"),
 
   dayPanel: $("day-panel"),
   dayPanelTitle: $("day-panel-title"),
   dayPanelClose: $("day-panel-close"),
-  dayAdd: $("day-add"),
   dayEvents: $("day-events"),
-
-  dayForm: $("day-form"),
-  formTitle: $("form-title"),
-  formAllday: $("form-allday"),
-  formStart: $("form-start"),
-  formEnd: $("form-end"),
-  formTimesRow: $("form-times-row"),
-  formColors: document.querySelectorAll(".swatch"),
-  formError: $("form-error"),
-  formCancel: $("form-cancel"),
-  formSave: $("form-save"),
 };
 
 /* =========================================================================
@@ -142,95 +115,12 @@ function isSameDay(a, b) {
 
 const lsGet = (k) => {
   try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; }
-  catch { return null; }
+  catch (e) { return null; }
 };
 
 const lsSet = (k, v) => {
-  try { localStorage.setItem(k, JSON.stringify(v)); } catch { }
+  try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { }
 };
-
-/* =========================================================================
- * Photo picker — left-side background image
- * ========================================================================= */
-
-const PHOTO_KEY = "dashboard_photo";
-const PHOTO_MAX_BYTES = 3 * 1024 * 1024; // ~3MB raw → ~4MB base64
-
-function applyPhotoDataUrl(dataUrl) {
-  // Wrap in url('...'). Data URLs use a base64 alphabet plus :/;,=, all of
-  // which are safe inside single quotes.
-  document.documentElement.style.setProperty("--clock-photo", `url('${dataUrl}')`);
-}
-
-function loadPhotoFromStorage() {
-  const dataUrl = lsGet(PHOTO_KEY);
-  if (typeof dataUrl === "string" && dataUrl.startsWith("data:image/")) {
-    applyPhotoDataUrl(dataUrl);
-  }
-}
-
-function savePhoto(dataUrl) {
-  try {
-    lsSet(PHOTO_KEY, dataUrl);
-    applyPhotoDataUrl(dataUrl);
-  } catch (e) {
-    console.warn("[photo] save failed:", e);
-    alert("L'image est trop volumineuse pour être enregistrée. Choisissez un fichier plus petit.");
-  }
-}
-
-function resetPhoto() {
-  lsSet(PHOTO_KEY, null);
-  document.documentElement.style.removeProperty("--clock-photo");
-}
-
-function wirePhotoPicker() {
-  if (!dom.photoSettings) return;
-
-  const closeMenu = () => dom.photoMenu.classList.add("hidden");
-
-  dom.photoSettings.addEventListener("click", (e) => {
-    e.stopPropagation();
-    dom.photoMenu.classList.toggle("hidden");
-  });
-
-  document.addEventListener("click", (e) => {
-    if (dom.photoMenu.classList.contains("hidden")) return;
-    if (dom.photoMenu.contains(e.target)) return;
-    if (dom.photoSettings.contains(e.target)) return;
-    closeMenu();
-  });
-
-  dom.photoChoose.addEventListener("click", () => {
-    closeMenu();
-    dom.photoInput.click();
-  });
-
-  dom.photoReset.addEventListener("click", () => {
-    closeMenu();
-    resetPhoto();
-  });
-
-  dom.photoInput.addEventListener("change", () => {
-    const file = dom.photoInput.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      alert("Le fichier choisi n'est pas une image.");
-      return;
-    }
-    if (file.size > PHOTO_MAX_BYTES) {
-      alert(`L'image dépasse ${Math.round(PHOTO_MAX_BYTES / 1024 / 1024)} Mo. Choisissez un fichier plus petit.`);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") savePhoto(reader.result);
-    };
-    reader.onerror = () => alert("Impossible de lire le fichier.");
-    reader.readAsDataURL(file);
-    dom.photoInput.value = ""; // allow re-selecting the same file
-  });
-}
 
 /* =========================================================================
  * Clock
@@ -246,10 +136,13 @@ function tickClock() {
   }).format(now);
   // Re-evaluate theme + refresh notifications on every minute boundary.
   // Cheap; theme only restyles when the result actually changes, and
-  // notifications re-render quickly from in-memory state.events.
+  // notifications re-render quickly from in-memory state.todayEvents.
   if (now.getSeconds() === 0) {
     applyTheme();
-    renderNotifications();
+    renderCalendarStatus();
+    // Midnight: "today" moved — recompute today's list and the red square.
+    if (now.getHours() === 0 && now.getMinutes() === 0) refreshEventsFromCalendar();
+    else renderNotifications();
   }
 }
 
@@ -407,7 +300,7 @@ function renderWeather(payload, opts = {}) {
   const [tempColor, tempGlow] = tempPalette(temp);
   dom.weatherTemp.style.setProperty("--temp-color", tempColor);
   dom.weatherTemp.style.setProperty("--temp-glow", tempGlow);
-  const desc = WMO[code] ?? "—";
+  const desc = WMO[code] != null ? WMO[code] : "—";
   dom.weatherDesc.innerHTML = opts.stale
     ? `<span class="stale-dot"></span>${desc}`
     : desc;
@@ -417,8 +310,8 @@ function renderWeather(payload, opts = {}) {
 
   renderHourly(payload.hourly);
 
-  state.sunrise = daily.sunrise?.[0] || null;
-  state.sunset  = daily.sunset?.[0]  || null;
+  state.sunrise = (daily.sunrise && daily.sunrise[0]) || null;
+  state.sunset  = (daily.sunset && daily.sunset[0])   || null;
   applyTheme();
 }
 
@@ -517,150 +410,163 @@ function startWeather() {
 }
 
 /* =========================================================================
- * Google auth (GIS token model)
+ * Calendar worker — parses and expands the iCal feed off the UI thread
  * ========================================================================= */
 
-function isTokenValid() {
-  return state.auth.accessToken && Date.now() < state.auth.expiresAt - 30_000;
+let calendarWorker = null;
+const workerPending = new Map(); // id → { resolve, reject }
+let workerNextId = 1;
+
+function getCalendarWorker() {
+  if (calendarWorker) return calendarWorker;
+  calendarWorker = new Worker("calendar-worker.js");
+  calendarWorker.onmessage = (e) => {
+    const msg = e.data;
+    const p = workerPending.get(msg.id);
+    if (!p) return;
+    workerPending.delete(msg.id);
+    if (msg.ok) p.resolve(msg.result);
+    else p.reject(new Error(msg.error || "worker_error"));
+  };
+  calendarWorker.onerror = (e) => {
+    console.warn("[calendar] worker error:", e.message || e);
+    const err = new Error("worker_error: " + (e.message || "unknown"));
+    workerPending.forEach((p) => p.reject(err));
+    workerPending.clear();
+  };
+  return calendarWorker;
 }
 
-function persistToken() {
-  lsSet("gcal_auth", {
-    accessToken: state.auth.accessToken,
-    expiresAt: state.auth.expiresAt,
-  });
-}
-
-function loadPersistedToken() {
-  const saved = lsGet("gcal_auth");
-  if (saved && saved.accessToken && saved.expiresAt > Date.now()) {
-    state.auth.accessToken = saved.accessToken;
-    state.auth.expiresAt = saved.expiresAt;
-    return true;
-  }
-  return false;
-}
-
-function clearToken() {
-  state.auth.accessToken = null;
-  state.auth.expiresAt = 0;
-  lsSet("gcal_auth", null);
-  if (state.auth.refreshTimer) {
-    clearTimeout(state.auth.refreshTimer);
-    state.auth.refreshTimer = null;
-  }
-}
-
-function scheduleSilentRefresh() {
-  if (state.auth.refreshTimer) clearTimeout(state.auth.refreshTimer);
-  const delay = Math.max(60_000, state.auth.expiresAt - Date.now() - CONFIG.TOKEN_REFRESH_BEFORE_MS);
-  state.auth.refreshTimer = setTimeout(() => {
-    requestToken({ silent: true }).catch(err => {
-      console.warn("[auth] silent refresh failed:", err);
-    });
-  }, delay);
-}
-
-function ensureTokenClient() {
-  if (state.auth.tokenClient) return state.auth.tokenClient;
-  if (!window.google || !google.accounts || !google.accounts.oauth2) {
-    throw new Error("Google Identity Services script not loaded yet");
-  }
-  if (!CONFIG.GOOGLE_CLIENT_ID) {
-    throw new Error("CONFIG.GOOGLE_CLIENT_ID is empty — see README for setup");
-  }
-
-  state.auth.tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CONFIG.GOOGLE_CLIENT_ID,
-    scope: CONFIG.GOOGLE_SCOPE,
-    callback: () => { },        // overridden per-call
-    error_callback: () => { },  // overridden per-call
-  });
-  return state.auth.tokenClient;
-}
-
-function requestToken({ silent }) {
+function callWorker(msg) {
   return new Promise((resolve, reject) => {
-    let client;
-    try { client = ensureTokenClient(); }
-    catch (e) { reject(e); return; }
-
-    let settled = false;
-    const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
-
-    client.callback = (resp) => {
-      if (resp && resp.access_token) {
-        state.auth.accessToken = resp.access_token;
-        const ttl = (resp.expires_in ? Number(resp.expires_in) : 3600) * 1000;
-        state.auth.expiresAt = Date.now() + ttl;
-        persistToken();
-        scheduleSilentRefresh();
-        showCalendarOverlay(false);
-        settle(resolve, resp.access_token);
-      } else {
-        settle(reject, new Error(resp?.error || "No access token returned"));
-      }
-    };
-
-    client.error_callback = (err) => {
-      settle(reject, new Error(err?.type || err?.message || "gis_error"));
-    };
-
-    try {
-      client.requestAccessToken({ prompt: silent ? "" : "consent" });
-    } catch (e) {
-      settle(reject, e);
-    }
-
-    // Safety net: if GIS never invokes either callback within 8 s for a silent
-    // attempt, treat it as a failure so the UI can show the Connect button.
-    if (silent) {
-      setTimeout(() => settle(reject, new Error("silent_timeout")), 8000);
-    }
+    const id = workerNextId++;
+    workerPending.set(id, { resolve, reject });
+    getCalendarWorker().postMessage(Object.assign({ id }, msg));
   });
 }
+
+/* =========================================================================
+ * Calendar data — iCal feed via MainActivity's /calendar.ics proxy
+ * ========================================================================= */
 
 function showCalendarOverlay(show, msg) {
   if (!show) {
     dom.calOverlay.classList.add("hidden");
     return;
   }
-  dom.calOverlayMsg.textContent = msg || "Connecter Google Calendar";
+  dom.calOverlayMsg.textContent = msg || "Chargement du calendrier…";
   dom.calOverlay.classList.remove("hidden");
 }
 
-async function gcalFetch(url, opts = {}, retried = false) {
-  if (!isTokenValid()) {
-    try { await requestToken({ silent: true }); }
-    catch { /* fall through to overlay below */ }
-  }
-  if (!isTokenValid()) {
-    showCalendarOverlay(true);
-    throw new Error("not_authenticated");
-  }
+function gridRange(y, m) {
+  const start = new Date(y, m, 1 - new Date(y, m, 1).getDay()); // Sunday on or before the 1st
+  const end = new Date(start);
+  end.setDate(end.getDate() + 42);
+  return [start, end];
+}
 
-  const headers = {
-    ...(opts.headers || {}),
-    Authorization: `Bearer ${state.auth.accessToken}`,
-  };
-  if (opts.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+function parseDateKey(key) {
+  const p = key.split("-").map(Number);
+  return new Date(p[0], p[1] - 1, p[2]);
+}
 
-  const resp = await fetch(url, { ...opts, headers });
-  if (resp.status === 401 && !retried) {
-    clearToken();
-    try { await requestToken({ silent: true }); }
-    catch { showCalendarOverlay(true); throw new Error("not_authenticated"); }
-    return gcalFetch(url, opts, true);
+/* Renders right away from what we have (month changes stay instant), then asks
+ * the worker for the viewed grid and today, and re-renders when it answers. */
+function refreshEventsFromCalendar() {
+  const seq = ++state.refreshSeq;
+  renderCalendar();
+  renderNotifications();
+  if (!state.hasCalendar) return Promise.resolve();
+
+  const grid = gridRange(state.viewedYear, state.viewedMonth);
+  const today = startOfDay(new Date());
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  return callWorker({
+    type: "between",
+    ranges: [
+      [grid[0].getTime(), grid[1].getTime()],
+      [today.getTime(), tomorrow.getTime()],
+    ],
+  }).then((result) => {
+    if (seq !== state.refreshSeq) return; // a newer refresh (month change) superseded us
+    state.events = result[0];
+    state.todayEvents = result[1];
+    renderCalendar();
+    renderNotifications();
+    if (state.selectedDateKey) renderDayPanelEvents(parseDateKey(state.selectedDateKey));
+  }).catch((err) => {
+    console.warn("[calendar] expansion failed:", err);
+  });
+}
+
+// Rejects on an invalid feed and leaves the previously loaded calendar in place.
+function loadIcsText(text, fetchedAt) {
+  return callWorker({ type: "load", text }).then(() => {
+    state.hasCalendar = true;
+    state.icsFetchedAt = fetchedAt;
+    renderCalendarStatus();
+    refreshEventsFromCalendar();
+  });
+}
+
+function formatAge(ms) {
+  const min = Math.max(1, Math.round(ms / 60000));
+  if (min < 60) return `${min} min`;
+  return `${Math.round(min / 60)} h`;
+}
+
+function renderCalendarStatus() {
+  if (!state.icsOffline) {
+    dom.calStatus.classList.add("hidden");
+    return;
   }
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`gcal ${resp.status}: ${body.slice(0, 200)}`);
+  dom.calStatus.textContent = state.icsFetchedAt
+    ? `Hors ligne · mis à jour il y a ${formatAge(Date.now() - state.icsFetchedAt)}`
+    : "Hors ligne";
+  dom.calStatus.classList.remove("hidden");
+}
+
+async function fetchCalendar() {
+  try {
+    const r = await fetch(CONFIG.ICS_URL, { cache: "no-store" });
+    if (r.status === 404) {
+      // IcsProxy answers 404 when no ICAL_URL was set at build time.
+      showCalendarOverlay(true, "Calendrier non configuré — voir README");
+      return;
+    }
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const text = await r.text();
+    const fetchedAt = Date.now();
+    await loadIcsText(text, fetchedAt);
+    lsSet("ics_last", { text, fetchedAt });
+    state.icsOffline = false;
+    showCalendarOverlay(false);
+  } catch (err) {
+    console.warn("[calendar] fetch failed:", err);
+    state.icsOffline = true;
+    if (state.hasCalendar) showCalendarOverlay(false);
+    else showCalendarOverlay(true, "Calendrier hors ligne");
+  } finally {
+    renderCalendarStatus();
   }
-  return resp.json();
+}
+
+function startCalendar() {
+  // Show the last good feed right away; the fresh fetch replaces it when it lands.
+  const cached = lsGet("ics_last");
+  if (cached && cached.text) {
+    loadIcsText(cached.text, cached.fetchedAt)
+      .then(() => showCalendarOverlay(false))
+      .catch((err) => console.warn("[calendar] cached feed unusable:", err));
+  }
+  fetchCalendar();
+  setInterval(fetchCalendar, CONFIG.ICS_REFRESH_MS);
 }
 
 /* =========================================================================
- * Calendar — month grid + Google Calendar events
+ * Calendar — month grid
  * ========================================================================= */
 
 function monthLabel(y, m) {
@@ -670,38 +576,35 @@ function monthLabel(y, m) {
 }
 
 function classifyEventColor(ev) {
-  // Google colorIds — our three offered colors map directly. Anything else
-  // (events created in another client without a color) uses the red default,
-  // matching the reference layout's accent.
-  switch (ev.colorId) {
-    case "9":  return "blue";
-    case "10": return "green";
-    case "5":  return "amber";
-    case "11": return "red";
-    case "2":  return "green";
-    case "4":  return "red";
-    case "6":  return "red";
-    default:   return "red";
-  }
+  // iCal feeds don't carry Google's per-event colorId, so every event uses
+  // the red accent of the reference layout.
+  return "red";
 }
 
 function eventStart(ev) {
-  if (ev.start?.dateTime) return new Date(ev.start.dateTime);
-  if (ev.start?.date) {
-    const [y, m, d] = ev.start.date.split("-").map(Number);
+  const s = ev.start || {};
+  if (s.dateTime) return new Date(s.dateTime);
+  if (s.date) {
+    const [y, m, d] = s.date.split("-").map(Number);
     return new Date(y, m - 1, d);
   }
   return null;
 }
 
 function eventEnd(ev) {
-  if (ev.end?.dateTime) return new Date(ev.end.dateTime);
-  if (ev.end?.date) {
+  const e = ev.end || {};
+  if (e.dateTime) return new Date(e.dateTime);
+  if (e.date) {
     // All-day end is exclusive in GCal: subtract 1ms so it stays on the last day.
-    const [y, m, d] = ev.end.date.split("-").map(Number);
+    const [y, m, d] = e.date.split("-").map(Number);
     return new Date(new Date(y, m - 1, d).getTime() - 1);
   }
   return null;
+}
+
+function eventStartMs(ev) {
+  const s = eventStart(ev);
+  return s ? s.getTime() : 0;
 }
 
 function eventsForDay(day) {
@@ -715,21 +618,18 @@ function eventsForDay(day) {
       if (!s) return false;
       return s < dayEnd && e >= dayStart;
     })
-    .sort((a, b) => {
-      const as = eventStart(a)?.getTime() || 0;
-      const bs = eventStart(b)?.getTime() || 0;
-      return as - bs;
-    });
+    .sort((a, b) => eventStartMs(a) - eventStartMs(b));
 }
+
+// Replaced by the D-pad section in the next task.
+function focusCell() {}
 
 function renderCalendar() {
   const y = state.viewedYear;
   const m = state.viewedMonth;
   dom.calTitle.textContent = monthLabel(y, m);
 
-  const firstOfMonth = new Date(y, m, 1);
-  const startWeekday = firstOfMonth.getDay(); // 0=Sun
-  const gridStart = new Date(y, m, 1 - startWeekday);
+  const gridStart = gridRange(y, m)[0];
   const today = new Date();
 
   // Short month labels for the inline marker on the first day of next month.
@@ -793,36 +693,13 @@ function renderCalendar() {
       cell.appendChild(list);
     }
 
-    cell.addEventListener("click", () => openDayPanel(cellDate));
+    cell.addEventListener("click", () => {
+      state.focusedDateKey = cell.dataset.date;
+      openDayPanel(cellDate);
+    });
     dom.calGrid.appendChild(cell);
   }
-}
-
-async function fetchEventsForViewedMonth() {
-  if (!CONFIG.GOOGLE_CLIENT_ID) {
-    showCalendarOverlay(true, "Définir GOOGLE_CLIENT_ID dans app.js");
-    return;
-  }
-  const timeMin = new Date(state.viewedYear, state.viewedMonth, 1).toISOString();
-  const timeMax = new Date(state.viewedYear, state.viewedMonth + 1, 1).toISOString();
-  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CONFIG.CALENDAR_ID)}/events`
-    + `?timeMin=${encodeURIComponent(timeMin)}`
-    + `&timeMax=${encodeURIComponent(timeMax)}`
-    + `&singleEvents=true&orderBy=startTime&maxResults=250`;
-
-  try {
-    const data = await gcalFetch(url);
-    state.events = data.items || [];
-    renderCalendar();
-    renderNotifications();
-    if (state.selectedDateKey) {
-      const [y, m, d] = state.selectedDateKey.split("-").map(Number);
-      renderDayPanelEvents(new Date(y, m - 1, d));
-    }
-  } catch (err) {
-    if (err.message === "not_authenticated") return;
-    console.warn("[calendar] fetch failed:", err);
-  }
+  focusCell(state.focusedDateKey);
 }
 
 function renderNotifications() {
@@ -832,7 +709,7 @@ function renderNotifications() {
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  const upcoming = state.events
+  const upcoming = state.todayEvents
     .filter(ev => {
       const s = eventStart(ev);
       const e = eventEnd(ev) || s;
@@ -840,7 +717,7 @@ function renderNotifications() {
       // Show events that occur today and haven't ended yet.
       return s < tomorrow && e >= now;
     })
-    .sort((a, b) => (eventStart(a)?.getTime() || 0) - (eventStart(b)?.getTime() || 0))
+    .sort((a, b) => eventStartMs(a) - eventStartMs(b))
     .slice(0, CONFIG.NOTIF_MAX);
 
   if (!upcoming.length) {
@@ -850,7 +727,7 @@ function renderNotifications() {
 
   dom.notifList.innerHTML = upcoming.map(ev => {
     const color = classifyEventColor(ev);
-    const time = ev.start?.date
+    const time = ev.start && ev.start.date
       ? "Toute la journée"
       : (() => {
           const s = eventStart(ev);
@@ -873,13 +750,13 @@ function changeMonth(delta) {
   if (m > 11) { m = 0; y += 1; }
   state.viewedMonth = m;
   state.viewedYear = y;
-  state.events = [];
-  renderCalendar();
-  fetchEventsForViewedMonth();
+  state.focusedDateKey = dateKey(new Date(y, m, 1));
+  state.events = []; // don't paint last month's events on the new grid while the worker answers
+  refreshEventsFromCalendar();
 }
 
 /* =========================================================================
- * Day panel + add-event form
+ * Day panel
  * ========================================================================= */
 
 function formatDayPanelTitle(d) {
@@ -890,7 +767,7 @@ function formatDayPanelTitle(d) {
 }
 
 function formatEventTime(ev) {
-  if (ev.start?.date) return "Toute la journée";
+  if (ev.start && ev.start.date) return "Toute la journée";
   const s = eventStart(ev);
   const e = eventEnd(ev);
   const fmt = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
@@ -922,7 +799,6 @@ function renderDayPanelEvents(d) {
 function openDayPanel(d) {
   state.selectedDateKey = dateKey(d);
   dom.dayPanelTitle.textContent = formatDayPanelTitle(d);
-  hideForm();
   renderDayPanelEvents(d);
   dom.dayPanel.classList.remove("hidden");
   // Force reflow before adding is-open so the transform animates from 100%.
@@ -935,124 +811,7 @@ function closeDayPanel() {
   setTimeout(() => {
     dom.dayPanel.classList.add("hidden");
     state.selectedDateKey = null;
-    hideForm();
   }, 220);
-}
-
-function showForm() {
-  dom.dayEvents.classList.add("hidden");
-  dom.dayAdd.classList.add("hidden");
-  dom.dayForm.classList.remove("hidden");
-
-  // Defaults
-  const now = new Date();
-  const startHour = now.getHours();
-  const startMinute = now.getMinutes() < 30 ? 30 : 0;
-  const startBase = new Date(now);
-  if (startMinute === 0) startBase.setHours(startHour + 1);
-  startBase.setMinutes(startMinute, 0, 0);
-
-  // If the selected day is in the future, default to 09:00.
-  let start = startBase;
-  if (state.selectedDateKey) {
-    const [y, m, d] = state.selectedDateKey.split("-").map(Number);
-    const sel = new Date(y, m - 1, d);
-    if (sel > startOfDay(new Date())) {
-      start = new Date(y, m - 1, d, 9, 0, 0);
-    }
-  }
-  const end = new Date(start.getTime() + 60 * 60 * 1000);
-  dom.formStart.value = `${pad2(start.getHours())}:${pad2(start.getMinutes())}`;
-  dom.formEnd.value = `${pad2(end.getHours())}:${pad2(end.getMinutes())}`;
-  dom.formTitle.value = "";
-  dom.formAllday.checked = false;
-  dom.formTimesRow.classList.remove("hidden");
-  dom.formError.classList.add("hidden");
-  selectSwatch("blue");
-  setTimeout(() => dom.formTitle.focus(), 50);
-}
-
-function hideForm() {
-  dom.dayForm.classList.add("hidden");
-  dom.dayEvents.classList.remove("hidden");
-  dom.dayAdd.classList.remove("hidden");
-}
-
-function selectSwatch(color) {
-  dom.formColors.forEach(s => {
-    s.classList.toggle("is-selected", s.dataset.color === color);
-  });
-}
-
-function selectedColor() {
-  const sel = Array.from(dom.formColors).find(s => s.classList.contains("is-selected"));
-  return sel ? sel.dataset.color : "blue";
-}
-
-function colorToGoogleId(color) {
-  return { blue: "9", green: "10", amber: "5" }[color] || "9";
-}
-
-function showFormError(msg) {
-  dom.formError.textContent = msg;
-  dom.formError.classList.remove("hidden");
-}
-
-async function submitForm(e) {
-  e.preventDefault();
-  if (!state.selectedDateKey) return;
-
-  const title = dom.formTitle.value.trim();
-  if (!title) { showFormError("Le titre est requis."); return; }
-
-  const allDay = dom.formAllday.checked;
-  const [y, mo, d] = state.selectedDateKey.split("-").map(Number);
-  let start, end;
-
-  if (allDay) {
-    start = { date: state.selectedDateKey };
-    const next = new Date(y, mo - 1, d + 1);
-    end = { date: dateKey(next) };
-  } else {
-    const [sh, sm] = dom.formStart.value.split(":").map(Number);
-    const [eh, em] = dom.formEnd.value.split(":").map(Number);
-    const startD = new Date(y, mo - 1, d, sh, sm, 0);
-    const endD = new Date(y, mo - 1, d, eh, em, 0);
-    if (endD <= startD) { showFormError("L'heure de fin doit être après l'heure de début."); return; }
-    start = { dateTime: startD.toISOString(), timeZone: CONFIG.TIMEZONE };
-    end = { dateTime: endD.toISOString(), timeZone: CONFIG.TIMEZONE };
-  }
-
-  const body = {
-    summary: title,
-    start, end,
-    colorId: colorToGoogleId(selectedColor()),
-  };
-
-  dom.formSave.disabled = true;
-  dom.formError.classList.add("hidden");
-
-  try {
-    const created = await gcalFetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CONFIG.CALENDAR_ID)}/events`,
-      { method: "POST", body: JSON.stringify(body) }
-    );
-    state.events.push(created);
-    renderCalendar();
-    renderNotifications();
-    const sel = new Date(y, mo - 1, d);
-    renderDayPanelEvents(sel);
-    hideForm();
-  } catch (err) {
-    if (err.message === "not_authenticated") {
-      showFormError("Session expirée — reconnecter sur le calendrier.");
-    } else {
-      console.warn("[calendar] create failed:", err);
-      showFormError("Impossible d'enregistrer — vérifiez la connexion.");
-    }
-  } finally {
-    dom.formSave.disabled = false;
-  }
 }
 
 /* =========================================================================
@@ -1062,56 +821,7 @@ async function submitForm(e) {
 function wireEvents() {
   dom.calPrev.addEventListener("click", () => changeMonth(-1));
   dom.calNext.addEventListener("click", () => changeMonth(1));
-  dom.calConnect.addEventListener("click", async () => {
-    try {
-      await requestToken({ silent: false });
-      fetchEventsForViewedMonth();
-    } catch (err) {
-      console.warn("[auth] connect failed:", err);
-    }
-  });
-
   dom.dayPanelClose.addEventListener("click", closeDayPanel);
-  dom.dayAdd.addEventListener("click", showForm);
-  dom.formCancel.addEventListener("click", hideForm);
-  dom.dayForm.addEventListener("submit", submitForm);
-
-  dom.formAllday.addEventListener("change", () => {
-    dom.formTimesRow.classList.toggle("hidden", dom.formAllday.checked);
-  });
-
-  dom.formColors.forEach(s => {
-    s.addEventListener("click", () => selectSwatch(s.dataset.color));
-  });
-}
-
-/* =========================================================================
- * Auto-update
- * ========================================================================= */
-
-async function fetchDeployedVersion() {
-  try {
-    const r = await fetch("version.txt", { cache: "no-store" });
-    if (!r.ok) return null;
-    return (await r.text()).trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-function startUpdateWatcher() {
-  let loadedVersion = null;
-  fetchDeployedVersion().then(v => { loadedVersion = v; });
-
-  setInterval(async () => {
-    const v = await fetchDeployedVersion();
-    if (!v) return;
-    if (!loadedVersion) { loadedVersion = v; return; }
-    if (v === loadedVersion) return;
-    // Don't yank the page away while someone is reading or typing in the day panel.
-    if (!dom.dayPanel.classList.contains("hidden")) return;
-    location.reload();
-  }, CONFIG.UPDATE_CHECK_MS);
 }
 
 /* =========================================================================
@@ -1122,49 +832,15 @@ function init() {
   const now = new Date();
   state.viewedYear = now.getFullYear();
   state.viewedMonth = now.getMonth();
+  state.focusedDateKey = dateKey(now);
 
-  loadPhotoFromStorage();  // restore user-picked photo before first paint
   applyTheme();            // pick a theme from the fallback hours immediately
   startClock();
   startWeather();
   wireEvents();
-  wirePhotoPicker();
-  renderCalendar();
-  renderNotifications();   // initial render with empty events list
-  startUpdateWatcher();
-
-  if (!CONFIG.GOOGLE_CLIENT_ID) {
-    showCalendarOverlay(true, "Définir GOOGLE_CLIENT_ID dans app.js");
-    return;
-  }
-
-  if (loadPersistedToken()) {
-    scheduleSilentRefresh();
-    fetchEventsForViewedMonth();
-    return;
-  }
-
-  // No persisted token. Show the Connect overlay right away so the user always
-  // sees the button; silent auth runs in the background and, if it succeeds,
-  // hides the overlay via showCalendarOverlay(false) inside requestToken().
   showCalendarOverlay(true);
-
-  waitForGis().then(() => {
-    requestToken({ silent: true })
-      .then(() => fetchEventsForViewedMonth())
-      .catch(() => { /* overlay already visible */ });
-  }).catch(() => showCalendarOverlay(true, "Échec du chargement de Google Sign-In"));
-}
-
-function waitForGis(timeoutMs = 5000) {
-  return new Promise((resolve, reject) => {
-    const t0 = Date.now();
-    (function poll() {
-      if (window.google && google.accounts && google.accounts.oauth2) return resolve();
-      if (Date.now() - t0 > timeoutMs) return reject(new Error("GIS load timeout"));
-      setTimeout(poll, 100);
-    })();
-  });
+  refreshEventsFromCalendar(); // empty grid + list until the feed arrives
+  startCalendar();
 }
 
 if (document.readyState === "loading") {

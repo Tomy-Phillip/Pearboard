@@ -26,10 +26,10 @@
   --font-mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* --- Photo background ---
-   * Default is a CSS sunset gradient. Drop a `photo.jpg` next to index.html
-   * and set `--clock-photo: url('photo.jpg');` to replace it.
+   * android-board/photo.jpg is bundled as assets/web/photo.jpg at build time.
+   * When it's absent the url() layer fails to load and the gradient shows through.
    */
-  --clock-photo: none;
+  --clock-photo: url('photo.jpg');
   --clock-photo-fallback:
     radial-gradient(ellipse 800px 500px at 60% 30%, rgba(255, 180, 80, 0.55), transparent 60%),
     radial-gradient(ellipse 700px 400px at 30% 80%, rgba(20, 30, 60, 0.6), transparent 70%),
@@ -98,59 +98,6 @@ input  { font: inherit; color: inherit; }
     linear-gradient(180deg, rgba(0,0,0,0.40) 0%, transparent 35%, transparent 60%, rgba(0,0,0,0.55) 100%),
     linear-gradient(90deg, rgba(0,0,0,0.30) 0%, transparent 40%);
 }
-
-/* Photo picker — small button top-right + popover menu */
-
-.photo-settings {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  z-index: 3;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.40);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  color: rgba(255, 255, 255, 0.90);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 140ms;
-}
-
-.photo-settings:active { background: rgba(0, 0, 0, 0.62); }
-
-.photo-menu {
-  position: absolute;
-  top: 60px;
-  right: 14px;
-  z-index: 4;
-  background: rgba(15, 16, 24, 0.92);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 10px;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 220px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.50);
-}
-
-.photo-menu-btn {
-  padding: 12px 14px;
-  border-radius: 7px;
-  text-align: left;
-  color: #ffffff;
-  font-family: var(--font-sans);
-  font-size: 14px;
-  font-weight: 500;
-  transition: background 140ms;
-}
-
-.photo-menu-btn:active { background: rgba(255, 255, 255, 0.10); }
 
 .clock-overlay {
   position: relative;
@@ -440,6 +387,15 @@ input  { font: inherit; color: inherit; }
   letter-spacing: 0.01em;
 }
 
+.cal-title-wrap { display: flex; flex-direction: column; align-items: center; }
+
+.cal-status {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
 .cal-nav {
   width: 44px;
   height: 44px;
@@ -494,6 +450,13 @@ input  { font: inherit; color: inherit; }
 }
 
 .cal-cell:active { background: var(--surface-2); }
+
+/* D-pad focus — has to read from across the room */
+.cal-cell:focus {
+  outline: 4px solid var(--text);
+  outline-offset: -4px;
+  background: var(--surface-2);
+}
 
 .cal-cell-num {
   font-family: var(--font-sans);
@@ -641,17 +604,6 @@ input  { font: inherit; color: inherit; }
 
 .btn--ghost:active { background: var(--border); }
 
-.btn--add {
-  width: 100%;
-  margin-bottom: 14px;
-  font-size: 16px;
-  background: var(--surface-2);
-  border: 1px dashed var(--border);
-  color: var(--text);
-}
-
-.btn--add:active { background: var(--border); }
-
 /* ============================================================
  * Day panel + form (mostly unchanged from before, theme-light)
  * ============================================================ */
@@ -736,6 +688,7 @@ input  { font: inherit; color: inherit; }
 .day-event-stripe.stripe--green   { background: var(--bar-green); }
 .day-event-stripe.stripe--amber   { background: var(--bar-amber); }
 .day-event-stripe.stripe--default { background: var(--bar-red); }
+.day-event-stripe.stripe--red     { background: var(--bar-red); }
 
 .day-event-time {
   font-family: var(--font-mono);
@@ -752,99 +705,3 @@ input  { font: inherit; color: inherit; }
   padding: 20px 0;
   text-align: center;
 }
-
-/* Form */
-.day-form {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding-right: 4px;
-}
-
-.form-row { display: flex; flex-direction: column; gap: 6px; }
-.form-row--toggle { flex-direction: row; align-items: center; justify-content: space-between; padding: 6px 0; }
-.form-row--times { flex-direction: row; gap: 14px; }
-
-.form-half { flex: 1; display: flex; flex-direction: column; gap: 6px; }
-
-.form-label {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-weight: 500;
-}
-
-input[type="text"],
-input[type="time"] {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px 16px;
-  font-family: var(--font-sans);
-  font-size: 16px;
-  color: var(--text);
-  height: 56px;
-  width: 100%;
-  color-scheme: dark;
-}
-
-input[type="text"]:focus,
-input[type="time"]:focus {
-  border-color: var(--bar-red);
-  box-shadow: 0 0 0 3px rgba(210, 61, 79, 0.18);
-  outline: none;
-}
-
-input[type="checkbox"] {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 52px;
-  height: 30px;
-  background: var(--border);
-  border-radius: 15px;
-  position: relative;
-  transition: background 160ms;
-}
-
-input[type="checkbox"]::after {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--text);
-  transition: transform 160ms;
-}
-
-input[type="checkbox"]:checked { background: var(--today); }
-input[type="checkbox"]:checked::after { transform: translateX(22px); background: #fff; }
-
-.form-colors { display: flex; gap: 14px; }
-
-.swatch {
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  transition: border-color 140ms, transform 140ms;
-}
-.swatch.is-selected { border-color: var(--text); transform: scale(1.06); }
-.swatch--blue  { background: var(--bar-blue); }
-.swatch--green { background: var(--bar-green); }
-.swatch--amber { background: var(--bar-amber); }
-
-.form-error { color: #ff7676; font-size: 14px; padding: 6px 0; }
-
-.form-actions {
-  display: flex;
-  gap: 14px;
-  margin-top: auto;
-  padding-top: 14px;
-}
-
-.form-actions .btn { flex: 1; }
