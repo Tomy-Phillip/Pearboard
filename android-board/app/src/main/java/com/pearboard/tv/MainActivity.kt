@@ -25,8 +25,11 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        // A path handler gets the path *after* its prefix ("/web/index.html" → "index.html"),
+        // but the files live under assets/web/, so put the "web/" back.
+        val assets = WebViewAssetLoader.AssetsPathHandler(this)
         val assetLoader = WebViewAssetLoader.Builder()
-            .addPathHandler("/web/", WebViewAssetLoader.AssetsPathHandler(this))
+            .addPathHandler("/web/") { path -> assets.handle("web/$path") }
             .build()
 
         webView = WebView(this).apply {

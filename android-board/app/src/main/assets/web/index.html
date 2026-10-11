@@ -3,7 +3,9 @@
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=1920,initial-scale=1,user-scalable=no" />
+  <!-- No initial-scale: it would pin 1 CSS px to the screen density (2x on a 1080p
+       Fire TV) and crop the layout; MainActivity's loadWithOverviewMode fits 1920 to the width. -->
+  <meta name="viewport" content="width=1920,user-scalable=no" />
   <title>Tableau de bord</title>
   <link rel="stylesheet" href="style.css" />
 </head>
