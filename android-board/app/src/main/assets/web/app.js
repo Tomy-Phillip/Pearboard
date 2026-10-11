@@ -406,7 +406,6 @@ function tempPalette(t) {
 
 async function fetchWeather() {
   state.weatherRefreshing = true;
-  dom.weather.classList.add("is-refreshing");
   try {
     const r = await fetch(CONFIG.WEATHER_URL);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -425,7 +424,6 @@ async function fetchWeather() {
     }
   } finally {
     state.weatherRefreshing = false;
-    dom.weather.classList.remove("is-refreshing");
   }
 }
 
@@ -800,7 +798,8 @@ function renderCalendar() {
     });
     dom.calGrid.appendChild(cell);
   }
-  focusCell(state.focusedDateKey);
+  // With the day panel up, focus goes back to the grid when the panel closes.
+  if (!isDayPanelOpen()) focusCell(state.focusedDateKey);
 }
 
 function renderNotifications() {
@@ -941,6 +940,8 @@ function isDayPanelOpen() {
   return dom.dayPanel.classList.contains("is-open");
 }
 
+// preventScroll is ignored before Chrome 64 (old Fire TV WebViews); harmless,
+// the page never scrolls.
 function focusCell(key) {
   const cell = key && dom.calGrid.querySelector(`[data-date="${key}"]`);
   if (cell) cell.focus({ preventScroll: true });
