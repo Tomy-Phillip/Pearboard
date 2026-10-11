@@ -12,6 +12,9 @@ const CONFIG = {
   // takes a few seconds on a Fire TV, so this is far above any honest call.
   WORKER_TIMEOUT_MS: 60 * 1000,
 
+  // No key or click for this long: close the day panel and go back to today.
+  IDLE_RESET_MS: 5 * 60 * 1000,
+
   WEATHER_URL:
     "https://api.open-meteo.com/v1/forecast" +
     "?latitude=45.5088&longitude=-73.5878" +
@@ -47,6 +50,8 @@ const state = {
   icsFetchedAt: 0,
   icsOffline: false,
   focusedDateKey: null, // 'YYYY-MM-DD' of the D-pad focused cell
+  todayKey: null,       // 'YYYY-MM-DD' of today, to notice the date changing
+  lastInputAt: 0,       // Date.now() of the last keydown/click, for the idle reset
   refreshSeq: 0,   // drops worker replies for a month we've already left
   weather: null,
   weatherFetchedAt: 0,
@@ -138,16 +143,47 @@ function tickClock() {
   dom.clockDate.textContent = new Intl.DateTimeFormat("fr-CA", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
   }).format(now);
+  // Compared on every tick rather than at 00:00:00, which a throttled or
+  // late timer can skip.
+  if (dateKey(now) !== state.todayKey) followDateChange(now);
+  if (Date.now() - state.lastInputAt >= CONFIG.IDLE_RESET_MS) resetToToday();
   // Re-evaluate theme + refresh notifications on every minute boundary.
   // Cheap; theme only restyles when the result actually changes, and
   // notifications re-render quickly from in-memory state.todayEvents.
   if (now.getSeconds() === 0) {
     applyTheme();
     renderCalendarStatus();
-    // Midnight: "today" moved — recompute today's list and the red square.
-    if (now.getHours() === 0 && now.getMinutes() === 0) refreshEventsFromCalendar();
-    else renderNotifications();
+    renderNotifications();
   }
+}
+
+// "Today" moved (midnight, or the clock was corrected): follow it if the grid
+// was showing the old today's month, then recompute today's list and the red square.
+function followDateChange(now) {
+  const old = state.todayKey ? parseDateKey(state.todayKey) : null;
+  state.todayKey = dateKey(now);
+  if (old && state.viewedYear === old.getFullYear() && state.viewedMonth === old.getMonth()) {
+    if (state.viewedYear !== now.getFullYear() || state.viewedMonth !== now.getMonth()) {
+      state.events = []; // last month's events don't belong on the new grid
+    }
+    state.viewedYear = now.getFullYear();
+    state.viewedMonth = now.getMonth();
+    state.focusedDateKey = state.todayKey;
+  }
+  refreshEventsFromCalendar();
+}
+
+// Nobody has touched the remote for a while: put the wall display back on today.
+// Cheap no-op when it's already there, so the clock can call it every second.
+function resetToToday() {
+  if (isDayPanelOpen()) closeDayPanel(); // refocuses state.focusedDateKey when it's gone
+  const now = new Date();
+  const key = dateKey(now);
+  const onTodayMonth = state.viewedYear === now.getFullYear() && state.viewedMonth === now.getMonth();
+  if (onTodayMonth && state.focusedDateKey === key) return;
+  state.focusedDateKey = key;
+  if (onTodayMonth) focusCell(key);
+  else showMonth(now.getFullYear(), now.getMonth());
 }
 
 function startClock() {
@@ -948,6 +984,7 @@ function onKeyDown(e) {
 
 // Called by MainActivity on the remote's Back key. Returns true when consumed.
 window.pearboardBack = function () {
+  state.lastInputAt = Date.now(); // Back never reaches the page as a keydown
   if (!isDayPanelOpen()) return false;
   closeDayPanel();
   return true;
@@ -962,6 +999,10 @@ function wireEvents() {
   dom.calNext.addEventListener("click", () => changeMonth(1));
   dom.dayPanelClose.addEventListener("click", closeDayPanel);
   document.addEventListener("keydown", onKeyDown);
+  // Capture phase so the idle timer sees every key and click, whatever handles it.
+  const markInput = () => { state.lastInputAt = Date.now(); };
+  document.addEventListener("keydown", markInput, true);
+  document.addEventListener("click", markInput, true);
 }
 
 /* =========================================================================
@@ -973,6 +1014,8 @@ function init() {
   state.viewedYear = now.getFullYear();
   state.viewedMonth = now.getMonth();
   state.focusedDateKey = dateKey(now);
+  state.todayKey = dateKey(now);
+  state.lastInputAt = Date.now();
 
   applyTheme();            // pick a theme from the fallback hours immediately
   startClock();
