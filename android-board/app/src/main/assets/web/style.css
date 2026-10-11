@@ -1,0 +1,850 @@
+:root {
+  /* --- Surfaces --- */
+  --bg: #07080d;
+  --surface: #0d0e15;
+  --surface-2: #14151f;
+  --border: #1a1b26;
+
+  /* --- Text --- */
+  --text: #ffffff;
+  --text-soft: #d8d9ee;
+  --muted: #7a7f95;
+  --muted-2: #3d3f55;
+
+  /* --- Event/today palette (matches reference image) --- */
+  --today:        #de2a3f;     /* red square around today's number */
+  --today-glow:   rgba(222, 42, 63, 0.45);
+  --bar-red:      #d23d4f;
+  --bar-blue:     #2f6ad9;
+  --bar-green:    #2fa56b;
+  --bar-amber:    #d68a1a;
+
+  /* --- Weather temp palette is set inline via JS as --temp-color/--temp-glow --- */
+
+  /* --- Typography --- */
+  --font-sans: 'DM Sans', system-ui, -apple-system, Segoe UI, sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* --- Photo background ---
+   * Default is a CSS sunset gradient. Drop a `photo.jpg` next to index.html
+   * and set `--clock-photo: url('photo.jpg');` to replace it.
+   */
+  --clock-photo: none;
+  --clock-photo-fallback:
+    radial-gradient(ellipse 800px 500px at 60% 30%, rgba(255, 180, 80, 0.55), transparent 60%),
+    radial-gradient(ellipse 700px 400px at 30% 80%, rgba(20, 30, 60, 0.6), transparent 70%),
+    linear-gradient(180deg, #2a3450 0%, #d2724b 55%, #3a1d2e 100%);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { cursor: none; }
+
+html, body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button { font: inherit; color: inherit; background: none; border: none; outline: none; }
+input  { font: inherit; color: inherit; }
+
+.hidden { display: none !important; }
+
+.grid {
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 32fr 68fr;
+  grid-template-rows: 1fr;
+}
+
+.widget {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ============================================================
+ * Clock widget — photo background with overlay text + weather
+ * ============================================================ */
+
+.widget--clock {
+  grid-column: 1 / 2;
+  background: var(--surface);
+}
+
+.clock-photo {
+  position: absolute;
+  inset: 0;
+  background-image: var(--clock-photo), var(--clock-photo-fallback);
+  background-size: cover;
+  background-position: center;
+  z-index: 0;
+}
+
+.clock-photo::after {
+  /* Soft vignette to make text legible regardless of photo */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0.40) 0%, transparent 35%, transparent 60%, rgba(0,0,0,0.55) 100%),
+    linear-gradient(90deg, rgba(0,0,0,0.30) 0%, transparent 40%);
+}
+
+/* Photo picker — small button top-right + popover menu */
+
+.photo-settings {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 3;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.40);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: rgba(255, 255, 255, 0.90);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 140ms;
+}
+
+.photo-settings:active { background: rgba(0, 0, 0, 0.62); }
+
+.photo-menu {
+  position: absolute;
+  top: 60px;
+  right: 14px;
+  z-index: 4;
+  background: rgba(15, 16, 24, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 10px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.50);
+}
+
+.photo-menu-btn {
+  padding: 12px 14px;
+  border-radius: 7px;
+  text-align: left;
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 140ms;
+}
+
+.photo-menu-btn:active { background: rgba(255, 255, 255, 0.10); }
+
+.clock-overlay {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 24px;
+  padding: 28px 32px;
+}
+
+.clock-top { display: flex; flex-direction: column; gap: 6px; }
+
+.clock-date {
+  font-family: var(--font-sans);
+  font-size: clamp(44px, 4.4vw, 60px);
+  font-weight: 600;
+  color: #ffffff;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+}
+
+.clock-date::first-letter { text-transform: uppercase; }
+
+.clock-time {
+  font-family: var(--font-mono);
+  font-size: clamp(36px, 3.4vw, 48px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
+}
+
+/* ============================================================
+ * Weather overlay — bottom of clock, on top of the photo
+ * ============================================================ */
+
+.weather-overlay {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 20px;
+  row-gap: 4px;
+  align-items: end;
+  color: #ffffff;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+}
+
+.weather-overlay-main {
+  grid-column: 1 / 2;
+  grid-row: 1 / 3;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.weather-temp {
+  font-family: var(--font-mono);
+  font-size: clamp(72px, 6.5vw, 100px);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--temp-color, #ffffff);
+  filter: drop-shadow(0 2px 14px var(--temp-glow, rgba(0, 0, 0, 0.7)));
+  transition: color 240ms ease, filter 240ms ease;
+}
+
+.weather-icon {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.5));
+}
+
+.weather-icon svg { width: 100%; height: 100%; display: block; }
+
+.weather-overlay-desc {
+  grid-column: 2 / 3;
+  grid-row: 1 / 2;
+  font-size: 22px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.95);
+  align-self: end;
+}
+
+.weather-overlay-stats {
+  grid-column: 2 / 3;
+  grid-row: 2 / 3;
+  display: flex;
+  gap: 22px;
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  align-self: start;
+}
+
+.weather-overlay-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.weather-overlay-stat-label {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: rgba(255, 255, 255, 0.70);
+}
+
+.weather-overlay-stat:nth-child(1) { color: #ffd29c; }
+.weather-overlay-stat:nth-child(2) { color: #9cdfff; }
+
+/* Stale indicator — show as a small amber dot prefix on the description */
+.weather-overlay-desc .stale-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bar-amber);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+/* ============================================================
+ * Notifications panel — middle of the photo column
+ * ============================================================ */
+
+.notifications {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  color: #ffffff;
+}
+
+.notif-label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.65);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+  margin-bottom: 12px;
+}
+
+.notif-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+.notif {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.30);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-radius: 10px;
+  border-left: 3px solid var(--bar-red);
+}
+
+.notif.notif--blue   { border-left-color: var(--bar-blue); }
+.notif.notif--green  { border-left-color: var(--bar-green); }
+.notif.notif--amber  { border-left-color: var(--bar-amber); }
+.notif.notif--red    { border-left-color: var(--bar-red); }
+
+.notif-time {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  min-width: 56px;
+  font-variant-numeric: tabular-nums;
+}
+
+.notif-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notif-empty {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 14px;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+}
+
+/* ============================================================
+ * Hourly weather strip
+ * ============================================================ */
+
+.weather-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.weather-hourly {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.weather-hour {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.30);
+}
+
+.weather-hour-time {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.80);
+  letter-spacing: 0.02em;
+}
+
+.weather-hour-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.weather-hour-icon svg { width: 100%; height: 100%; display: block; }
+
+.weather-hour-temp {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 500;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+ * Calendar widget
+ * ============================================================ */
+
+.widget--calendar {
+  grid-column: 2 / 3;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  padding: 16px 20px 18px;
+  border-left: 1px solid var(--border);
+}
+
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  padding: 0 8px;
+}
+
+.cal-title {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+
+.cal-nav {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  font-size: 18px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 140ms, color 140ms;
+}
+
+.cal-nav:active { background: var(--surface-2); color: var(--text); }
+
+.cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-top: 6px;
+  padding: 8px 0;
+}
+
+.cal-weekdays span {
+  text-align: center;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+}
+
+.cal-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: repeat(6, 1fr);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  min-height: 0;
+}
+
+.cal-cell {
+  background: transparent;
+  padding: 8px 8px 6px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  transition: background 140ms;
+}
+
+.cal-cell:active { background: var(--surface-2); }
+
+.cal-cell-num {
+  font-family: var(--font-sans);
+  font-size: 17px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  line-height: 1;
+  padding: 4px 6px;
+  align-self: flex-start;
+}
+
+.cal-cell.is-othermonth .cal-cell-num { color: var(--muted); opacity: 0.55; }
+
+/* Today: red square wrapping the day number */
+.cal-cell.is-today .cal-cell-num {
+  background: var(--today);
+  color: #ffffff;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 4px 9px;
+  box-shadow: 0 0 18px var(--today-glow);
+}
+
+/* Inline next-month label, set by JS on the first day of the next month */
+.cal-cell-month {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-left: 8px;
+  align-self: flex-end;
+  padding-bottom: 2px;
+}
+
+.cal-cell-num-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  width: 100%;
+}
+
+/* ---- Event bars ---- */
+
+.cal-event-list {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+.cal-event-bar {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  padding: 2px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.01em;
+  color: #ffffff;
+}
+
+.cal-event-bar.bar--blue   { background: var(--bar-blue); }
+.cal-event-bar.bar--green  { background: var(--bar-green); }
+.cal-event-bar.bar--amber  { background: var(--bar-amber); }
+.cal-event-bar.bar--default,
+.cal-event-bar.bar--red    { background: var(--bar-red); }
+
+.cal-event-more {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--muted);
+  padding-left: 8px;
+  margin-top: 1px;
+  font-weight: 500;
+}
+
+/* Connect overlay (stays the same on the calendar widget) */
+.cal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 8, 13, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.cal-overlay-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  align-items: center;
+  text-align: center;
+  padding: 0 24px;
+}
+
+.cal-overlay-msg {
+  color: var(--text-soft);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ============================================================
+ * Buttons (used in connect overlay + day panel)
+ * ============================================================ */
+
+.btn {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 16px;
+  padding: 16px 28px;
+  border-radius: 10px;
+  min-height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: filter 140ms, transform 80ms;
+}
+
+.btn--primary {
+  color: #ffffff;
+  font-weight: 600;
+  background: var(--today);
+  box-shadow: 0 6px 20px var(--today-glow);
+}
+
+.btn--primary:active { transform: translateY(1px); filter: brightness(0.95); }
+
+.btn--ghost {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn--ghost:active { background: var(--border); }
+
+.btn--add {
+  width: 100%;
+  margin-bottom: 14px;
+  font-size: 16px;
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  color: var(--text);
+}
+
+.btn--add:active { background: var(--border); }
+
+/* ============================================================
+ * Day panel + form (mostly unchanged from before, theme-light)
+ * ============================================================ */
+
+.day-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 50vh;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-radius: 16px 16px 0 0;
+  padding: 20px 28px 28px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  transform: translateY(100%);
+  transition: transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.55);
+}
+
+.day-panel.is-open { transform: translateY(0); }
+
+.day-panel::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  width: 56px;
+  height: 4px;
+  margin-left: -28px;
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.day-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  margin-bottom: 16px;
+}
+
+.day-panel-title { font-size: 20px; font-weight: 500; color: var(--text); }
+
+.day-panel-close {
+  width: 48px;
+  height: 48px;
+  font-size: 28px;
+  color: var(--muted);
+  border-radius: 8px;
+}
+
+.day-panel-close:active { background: var(--border); color: var(--text); }
+
+.day-events {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.day-events::-webkit-scrollbar { width: 6px; }
+.day-events::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.day-event {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 56px;
+}
+
+.day-event-stripe { width: 4px; height: 30px; border-radius: 2px; }
+.day-event-stripe.stripe--blue    { background: var(--bar-blue); }
+.day-event-stripe.stripe--green   { background: var(--bar-green); }
+.day-event-stripe.stripe--amber   { background: var(--bar-amber); }
+.day-event-stripe.stripe--default { background: var(--bar-red); }
+
+.day-event-time {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 130px;
+}
+
+.day-event-title { font-size: 15px; color: var(--text); flex: 1; }
+
+.day-empty {
+  color: var(--muted);
+  font-size: 14px;
+  padding: 20px 0;
+  text-align: center;
+}
+
+/* Form */
+.day-form {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-right: 4px;
+}
+
+.form-row { display: flex; flex-direction: column; gap: 6px; }
+.form-row--toggle { flex-direction: row; align-items: center; justify-content: space-between; padding: 6px 0; }
+.form-row--times { flex-direction: row; gap: 14px; }
+
+.form-half { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+
+.form-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+input[type="text"],
+input[type="time"] {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  color: var(--text);
+  height: 56px;
+  width: 100%;
+  color-scheme: dark;
+}
+
+input[type="text"]:focus,
+input[type="time"]:focus {
+  border-color: var(--bar-red);
+  box-shadow: 0 0 0 3px rgba(210, 61, 79, 0.18);
+  outline: none;
+}
+
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 52px;
+  height: 30px;
+  background: var(--border);
+  border-radius: 15px;
+  position: relative;
+  transition: background 160ms;
+}
+
+input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform 160ms;
+}
+
+input[type="checkbox"]:checked { background: var(--today); }
+input[type="checkbox"]:checked::after { transform: translateX(22px); background: #fff; }
+
+.form-colors { display: flex; gap: 14px; }
+
+.swatch {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  transition: border-color 140ms, transform 140ms;
+}
+.swatch.is-selected { border-color: var(--text); transform: scale(1.06); }
+.swatch--blue  { background: var(--bar-blue); }
+.swatch--green { background: var(--bar-green); }
+.swatch--amber { background: var(--bar-amber); }
+
+.form-error { color: #ff7676; font-size: 14px; padding: 6px 0; }
+
+.form-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+.form-actions .btn { flex: 1; }
