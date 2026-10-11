@@ -10,6 +10,11 @@
 
 **Design doc:** `docs/plans/2026-10-11-android-tv-board-design.md`
 
+> **Amendments (2026-10-11, after review of Tasks 1–6). These override Tasks 7–8 where they conflict.**
+> - **Old Fire TV.** The user's TV is an older Fire OS model, so its WebView may be an old Chromium. Every asset JS file must parse as ES2017: no `?.`, no `??`, no `1_000` separators, no `catch {}` without a binding, and no APIs newer than Chromium 61. CSS must not use `inset`, flexbox `gap` (use margins; grids use `grid-gap`) or `clamp()`. Guard tests in `android-board/test/` enforce both.
+> - **iCal off the UI thread.** The first `between()` after a parse costs seconds on a realistic feed, even with the memoized `calendar-ics.js`. Parsing and expansion run in `assets/web/calendar-worker.js`, a Web Worker that `importScripts` `ical.js` and `calendar-ics.js`. It re-parses only when the feed text changed. `app.js` renders the grid immediately and fills in events when the worker replies, and drops stale replies.
+> - **Test command.** `npm test` runs `node --test "test/**/*.test.js"` and needs Node 21 or newer.
+
 **Environment facts (this PC):**
 - SDK: `%LOCALAPPDATA%\Android\Sdk` (platforms 28–35, build-tools 35.0.0). `adb` = `$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe` (not on PATH).
 - JDK 17 on PATH (Android Studio JBR). Gradle 8.3 cached in `~/.gradle/wrapper/dists/gradle-8.3-all/` (used once to generate the 8.7 wrapper).
