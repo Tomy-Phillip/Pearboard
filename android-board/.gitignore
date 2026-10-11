@@ -1,0 +1,8 @@
+.gradle/
+build/
+.idea/
+*.iml
+local.properties
+node_modules/
+# Optional clock background, bundled at build time (personal photo, never committed)
+photo.jpg
