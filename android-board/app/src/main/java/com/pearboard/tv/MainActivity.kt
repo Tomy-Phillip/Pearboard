@@ -36,6 +36,15 @@ class MainActivity : Activity() {
         webView.requestFocus()
     }
 
+    // Back closes the day panel when it's open; otherwise it leaves the app.
+    @Deprecated("Deprecated in Java")
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        webView.evaluateJavascript("window.pearboardBack ? window.pearboardBack() : false") { consumed ->
+            if (consumed != "true") finish()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         webView.onResume()

@@ -555,13 +555,15 @@ async function fetchCalendar() {
 
 function startCalendar() {
   // Show the last good feed right away; the fresh fetch replaces it when it lands.
+  // The first fetch waits for the cached load to settle, so an offline start
+  // doesn't flash "Calendrier hors ligne" before the cached calendar shows.
   const cached = lsGet("ics_last");
-  if (cached && cached.text) {
-    loadIcsText(cached.text, cached.fetchedAt)
+  const cachedLoaded = cached && cached.text
+    ? loadIcsText(cached.text, cached.fetchedAt)
       .then(() => showCalendarOverlay(false))
-      .catch((err) => console.warn("[calendar] cached feed unusable:", err));
-  }
-  fetchCalendar();
+      .catch((err) => console.warn("[calendar] cached feed unusable:", err))
+    : Promise.resolve();
+  cachedLoaded.then(fetchCalendar);
   setInterval(fetchCalendar, CONFIG.ICS_REFRESH_MS);
 }
 
@@ -620,9 +622,6 @@ function eventsForDay(day) {
     })
     .sort((a, b) => eventStartMs(a) - eventStartMs(b));
 }
-
-// Replaced by the D-pad section in the next task.
-function focusCell() {}
 
 function renderCalendar() {
   const y = state.viewedYear;
@@ -743,16 +742,18 @@ function renderNotifications() {
   }).join("");
 }
 
-function changeMonth(delta) {
-  let m = state.viewedMonth + delta;
-  let y = state.viewedYear;
-  if (m < 0) { m = 11; y -= 1; }
-  if (m > 11) { m = 0; y += 1; }
-  state.viewedMonth = m;
+// Switches the grid to another month; set state.focusedDateKey first.
+function showMonth(y, m) {
   state.viewedYear = y;
-  state.focusedDateKey = dateKey(new Date(y, m, 1));
+  state.viewedMonth = m;
   state.events = []; // don't paint last month's events on the new grid while the worker answers
-  refreshEventsFromCalendar();
+  refreshEventsFromCalendar(); // re-renders the grid, which restores focus
+}
+
+function changeMonth(delta) {
+  const first = new Date(state.viewedYear, state.viewedMonth + delta, 1);
+  state.focusedDateKey = dateKey(first);
+  showMonth(first.getFullYear(), first.getMonth());
 }
 
 /* =========================================================================
@@ -809,10 +810,82 @@ function openDayPanel(d) {
 function closeDayPanel() {
   dom.dayPanel.classList.remove("is-open");
   setTimeout(() => {
+    if (isDayPanelOpen()) return; // reopened (quick OK-OK) before the slide-out ended
     dom.dayPanel.classList.add("hidden");
     state.selectedDateKey = null;
+    focusCell(state.focusedDateKey);
   }, 220);
 }
+
+/* =========================================================================
+ * Remote control (D-pad) — arrows move a day/week, OK opens, Back closes
+ * ========================================================================= */
+
+const KEY_STEPS = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+
+// Some old WebViews report e.key as "Unidentified" for remote keys; fall back on keyCode.
+const KEY_CODES = { 13: "Enter", 27: "Escape", 37: "ArrowLeft", 38: "ArrowUp", 39: "ArrowRight", 40: "ArrowDown" };
+
+function keyName(e) {
+  if (e.key && e.key !== "Unidentified") return e.key;
+  return KEY_CODES[e.keyCode] || "";
+}
+
+function isStepKey(key) {
+  return Object.prototype.hasOwnProperty.call(KEY_STEPS, key);
+}
+
+function isDayPanelOpen() {
+  return dom.dayPanel.classList.contains("is-open");
+}
+
+function focusCell(key) {
+  const cell = key && dom.calGrid.querySelector(`[data-date="${key}"]`);
+  if (cell) cell.focus({ preventScroll: true });
+}
+
+function moveFocus(days) {
+  const d = parseDateKey(state.focusedDateKey);
+  d.setDate(d.getDate() + days);
+  state.focusedDateKey = dateKey(d);
+  if (d.getMonth() !== state.viewedMonth || d.getFullYear() !== state.viewedYear) {
+    showMonth(d.getFullYear(), d.getMonth());
+  } else {
+    focusCell(state.focusedDateKey);
+  }
+}
+
+function onKeyDown(e) {
+  const key = keyName(e);
+  if (isDayPanelOpen()) {
+    if (key === "Enter" || key === "Escape") {
+      e.preventDefault();
+      closeDayPanel();
+    } else if (key === "ArrowUp" || key === "ArrowDown") {
+      e.preventDefault();
+      dom.dayEvents.scrollTop += key === "ArrowUp" ? -120 : 120;
+    } else if (isStepKey(key)) {
+      e.preventDefault();
+    }
+    return;
+  }
+  if (isStepKey(key)) {
+    // preventDefault also stops the WebView's own spatial navigation.
+    e.preventDefault();
+    moveFocus(KEY_STEPS[key]);
+  } else if (key === "Enter") {
+    // preventDefault stops the focused <button> from also firing a click.
+    e.preventDefault();
+    openDayPanel(parseDateKey(state.focusedDateKey));
+  }
+}
+
+// Called by MainActivity on the remote's Back key. Returns true when consumed.
+window.pearboardBack = function () {
+  if (!isDayPanelOpen()) return false;
+  closeDayPanel();
+  return true;
+};
 
 /* =========================================================================
  * Wire up UI events
@@ -822,6 +895,7 @@ function wireEvents() {
   dom.calPrev.addEventListener("click", () => changeMonth(-1));
   dom.calNext.addEventListener("click", () => changeMonth(1));
   dom.dayPanelClose.addEventListener("click", closeDayPanel);
+  document.addEventListener("keydown", onKeyDown);
 }
 
 /* =========================================================================
