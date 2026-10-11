@@ -1,3 +1,12 @@
+/* DM Sans / DM Mono, latin subset, bundled under fonts/ (npm run vendor-fonts):
+ * a remote font stylesheet would hold up first paint on a cold start with a
+ * hung network. */
+@font-face { font-family: 'DM Sans'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/dm-sans-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'DM Sans'; font-style: normal; font-weight: 500; font-display: swap; src: url('fonts/dm-sans-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'DM Sans'; font-style: normal; font-weight: 600; font-display: swap; src: url('fonts/dm-sans-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'DM Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/dm-mono-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'DM Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url('fonts/dm-mono-latin-500-normal.woff2') format('woff2'); }
+
 :root {
   /* --- Surfaces --- */
   --bg: #07080d;
@@ -54,7 +63,6 @@ html, body {
 }
 
 button { font: inherit; color: inherit; background: none; border: none; outline: none; }
-input  { font: inherit; color: inherit; }
 
 .hidden { display: none !important; }
 
@@ -561,7 +569,7 @@ input  { font: inherit; color: inherit; }
 /* 1px + the list's 3px spacing; more specific than `.cal-event-list > * + *` */
 .cal-event-list > .cal-event-more { margin-top: 4px; }
 
-/* Connect overlay (stays the same on the calendar widget) */
+/* Status overlay over the calendar (loading, offline, not configured, error) */
 .cal-overlay {
   position: absolute;
   top: 0;
@@ -595,41 +603,7 @@ input  { font: inherit; color: inherit; }
 }
 
 /* ============================================================
- * Buttons (used in connect overlay + day panel)
- * ============================================================ */
-
-.btn {
-  font-family: var(--font-sans);
-  font-weight: 500;
-  font-size: 16px;
-  padding: 16px 28px;
-  border-radius: 10px;
-  min-height: 52px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: filter 140ms, transform 80ms;
-}
-
-.btn--primary {
-  color: #ffffff;
-  font-weight: 600;
-  background: var(--today);
-  box-shadow: 0 6px 20px var(--today-glow);
-}
-
-.btn--primary:active { transform: translateY(1px); filter: brightness(0.95); }
-
-.btn--ghost {
-  background: var(--surface-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-
-.btn--ghost:active { background: var(--border); }
-
-/* ============================================================
- * Day panel + form (mostly unchanged from before, theme-light)
+ * Day panel — read-only list of the selected day's events
  * ============================================================ */
 
 .day-panel {

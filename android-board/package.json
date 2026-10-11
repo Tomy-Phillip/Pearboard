@@ -8,9 +8,12 @@
   "scripts": {
     "test": "node --test \"test/**/*.test.js\"",
     "dev": "node dev-server.js",
-    "vendor": "node -e \"require('fs').copyFileSync('node_modules/ical.js/build/ical.js','app/src/main/assets/web/ical.js')\""
+    "vendor": "node -e \"require('fs').copyFileSync('node_modules/ical.js/build/ical.js','app/src/main/assets/web/ical.js')\"",
+    "vendor-fonts": "node -e \"const fs=require('fs');const out='app/src/main/assets/web/fonts/';fs.mkdirSync(out,{recursive:true});for(const f of ['dm-sans-latin-400','dm-sans-latin-500','dm-sans-latin-600','dm-mono-latin-400','dm-mono-latin-500']){const n=f+'-normal.woff2';fs.copyFileSync('node_modules/@fontsource/'+f.split('-latin')[0]+'/files/'+n,out+n)}\""
   },
   "devDependencies": {
+    "@fontsource/dm-mono": "5.3.0",
+    "@fontsource/dm-sans": "5.3.0",
     "acorn": "8.19.0",
     "ical.js": "1.5.0"
   }

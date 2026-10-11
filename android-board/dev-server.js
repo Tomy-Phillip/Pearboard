@@ -14,6 +14,7 @@ const TYPES = {
   ".css": "text/css; charset=utf-8",
   ".jpg": "image/jpeg",
   ".png": "image/png",
+  ".woff2": "font/woff2",
 };
 
 function send(res, file, type, missingStatus) {
