@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dev tooling for the web UI bundled in the Android TV app",
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test \"test/**/*.test.js\"",
     "dev": "node dev-server.js",
     "vendor": "node -e \"require('fs').copyFileSync('node_modules/ical.js/build/ical.js','app/src/main/assets/web/ical.js')\""
   },
