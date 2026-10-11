@@ -1,8 +1,11 @@
 package com.pearboard.tv
 
+import android.os.SystemClock
 import android.util.Log
 import android.webkit.WebResourceResponse
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -15,23 +18,33 @@ import java.net.URL
 object IcsProxy {
     private const val TAG = "IcsProxy"
 
+    private const val CONNECT_TIMEOUT_MS = 10_000
+    private const val READ_TIMEOUT_MS = 15_000 // per read() call, so a trickling server can outlast it...
+    private const val TOTAL_TIMEOUT_MS = 30_000L // ...which is what this cap on the whole download is for
+
     fun fetch(): WebResourceResponse {
         val icalUrl = BuildConfig.ICAL_URL
         if (icalUrl.isBlank()) return error(404, "Not configured")
 
+        val deadline = SystemClock.elapsedRealtime() + TOTAL_TIMEOUT_MS
         return try {
             val conn = URL(icalUrl).openConnection() as HttpURLConnection
-            conn.connectTimeout = 15_000
-            conn.readTimeout = 30_000
+            conn.connectTimeout = CONNECT_TIMEOUT_MS
+            conn.readTimeout = READ_TIMEOUT_MS
             try {
                 val status = conn.responseCode
                 if (status == HttpURLConnection.HTTP_OK) {
-                    val body = conn.inputStream.use { it.readBytes() }
-                    WebResourceResponse(
-                        "text/calendar", "utf-8", 200, "OK",
-                        mapOf("Cache-Control" to "no-store"),
-                        ByteArrayInputStream(body),
-                    )
+                    val body = conn.inputStream.use { readBefore(it, deadline) }
+                    if (body == null) {
+                        Log.w(TAG, "iCal download took over ${TOTAL_TIMEOUT_MS / 1000} s")
+                        error(502, "Too slow")
+                    } else {
+                        WebResourceResponse(
+                            "text/calendar", "utf-8", 200, "OK",
+                            mapOf("Cache-Control" to "no-store"),
+                            ByteArrayInputStream(body),
+                        )
+                    }
                 } else {
                     Log.w(TAG, "iCal download returned HTTP $status")
                     error(502, "Upstream $status")
@@ -43,6 +56,18 @@ object IcsProxy {
             // Also covers a mistyped ICAL_URL (non-http scheme, bad host): never crash the page load.
             Log.w(TAG, "iCal download failed", e)
             error(502, "Fetch failed")
+        }
+    }
+
+    // Reads the whole stream, or returns null once the deadline has passed.
+    private fun readBefore(input: InputStream, deadline: Long): ByteArray? {
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(16 * 1024)
+        while (true) {
+            if (SystemClock.elapsedRealtime() > deadline) return null
+            val n = input.read(buffer)
+            if (n < 0) return out.toByteArray()
+            out.write(buffer, 0, n)
         }
     }
 
