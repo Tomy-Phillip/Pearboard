@@ -11,6 +11,8 @@ const WEB_DIR = path.join(__dirname, "..", "app", "src", "main", "assets", "web"
 const FILES = ["app.js", "calendar-worker.js", "calendar-ics.js"];
 
 const RULES = [
+  // The stock API 25 Android TV emulator ships WebView 55.
+  { name: "String.prototype.padStart/padEnd (Chrome 57)", re: /\.pad(Start|End)\(/ },
   { name: "Promise.prototype.finally (Chrome 63)", re: /\.finally\(/ },
   { name: "globalThis (Chrome 71)", re: /\bglobalThis\b/ },
   { name: "Array.prototype.flat (Chrome 69)", re: /\.flat\(/ },
@@ -33,6 +35,7 @@ function findViolations(src) {
 
 test("the guard catches each unsupported API", () => {
   const bad = [
+    "s.padStart(2, '0');",
     "p.finally(done);",
     "const g = globalThis;",
     "a.flat();",

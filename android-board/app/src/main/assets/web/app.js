@@ -103,7 +103,8 @@ const dom = {
  * Utilities
  * ========================================================================= */
 
-function pad2(n) { return String(n).padStart(2, "0"); }
+// Not padStart: it only arrived in Chrome 57, and the API 25 WebView can be Chrome 55.
+function pad2(n) { return (n < 10 ? "0" : "") + n; }
 
 function dateKey(d) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
