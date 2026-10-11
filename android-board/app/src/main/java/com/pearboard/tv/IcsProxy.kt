@@ -3,7 +3,6 @@ package com.pearboard.tv
 import android.util.Log
 import android.webkit.WebResourceResponse
 import java.io.ByteArrayInputStream
-import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -40,7 +39,8 @@ object IcsProxy {
             } finally {
                 conn.disconnect()
             }
-        } catch (e: IOException) {
+        } catch (e: Exception) {
+            // Also covers a mistyped ICAL_URL (non-http scheme, bad host): never crash the page load.
             Log.w(TAG, "iCal download failed", e)
             error(502, "Fetch failed")
         }
