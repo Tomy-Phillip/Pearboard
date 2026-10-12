@@ -10,10 +10,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Serves /calendar.ics to the web UI by downloading the secret Google Calendar
- * iCal address natively. Keeps the address out of JS and sidesteps CORS.
+ * Serves /calendar/<n>.ics to the web UI by downloading the n-th secret Google
+ * Calendar iCal address natively. Keeps the addresses out of JS and sidesteps CORS.
  *
- * 404 = no ICAL_URL configured at build time, 502 = download failed.
+ * 404 = no calendar n configured at build time, 502 = download failed.
  */
 object IcsProxy {
     private const val TAG = "IcsProxy"
@@ -22,9 +22,9 @@ object IcsProxy {
     private const val READ_TIMEOUT_MS = 15_000 // per read() call, so a trickling server can outlast it...
     private const val TOTAL_TIMEOUT_MS = 30_000L // ...which is what this cap on the whole download is for
 
-    fun fetch(): WebResourceResponse {
-        val icalUrl = BuildConfig.ICAL_URL
-        if (icalUrl.isBlank()) return error(404, "Not configured")
+    fun fetch(index: Int): WebResourceResponse {
+        val icalUrl = BuildConfig.CALENDAR_URLS.getOrNull(index)
+        if (icalUrl.isNullOrBlank()) return error(404, "Not configured")
 
         val deadline = SystemClock.elapsedRealtime() + TOTAL_TIMEOUT_MS
         return try {
@@ -46,7 +46,7 @@ object IcsProxy {
                         )
                     }
                 } else {
-                    Log.w(TAG, "iCal download returned HTTP $status")
+                    Log.w(TAG, "iCal download $index returned HTTP $status")
                     error(502, "Upstream $status")
                 }
             } finally {
@@ -54,7 +54,7 @@ object IcsProxy {
             }
         } catch (e: Exception) {
             // Also covers a mistyped ICAL_URL (non-http scheme, bad host): never crash the page load.
-            Log.w(TAG, "iCal download failed", e)
+            Log.w(TAG, "iCal download $index failed", e)
             error(502, "Fetch failed")
         }
     }

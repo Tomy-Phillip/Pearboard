@@ -4,15 +4,18 @@
  * Configuration
  * ========================================================================= */
 
+// Written by app/build.gradle.kts into config.js: calendar names/colors, rotation.
+// The secret iCal addresses stay in Kotlin (IcsProxy serves /calendar/<n>.ics).
+const BOARD = window.PEARBOARD || { rotation: "none", calendars: [] };
+const CALENDARS = BOARD.calendars; // [{ name, color }], index = calId
+
 const CONFIG = {
-  // Proxied by MainActivity (IcsProxy) — the secret iCal address never reaches JS.
-  ICS_URL: "/calendar.ics",
   ICS_REFRESH_MS: 10 * 60 * 1000,
   // Backstop for a worker that never answers; the first parse of a real feed
   // takes a few seconds on a Fire TV, so this is far above any honest call.
   WORKER_TIMEOUT_MS: 60 * 1000,
 
-  // No key or click for this long: close the day panel and go back to today.
+  // No key or click for this long: close the day panel and go back to today's month.
   IDLE_RESET_MS: 5 * 60 * 1000,
 
   WEATHER_URL:
@@ -20,21 +23,17 @@ const CONFIG = {
     "?latitude=45.5088&longitude=-73.5878" +
     "&current_weather=true" +
     "&hourly=temperature_2m,weathercode" +
-    "&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset" +
+    "&daily=temperature_2m_max,temperature_2m_min" +
     "&timezone=America/Toronto&forecast_days=2",
 
-  HOURLY_HOURS: 6,
-  NOTIF_MAX: 5,
+  // Hours from now shown under the weather ("Maint.", +2 h, …).
+  HOURLY_OFFSETS: [0, 2, 4, 6, 8],
+  // Cards in "Événements du jour" (two rows of two).
+  TODAY_MAX: 4,
 
   WEATHER_REFRESH_MS: 5 * 60 * 1000,
   WEATHER_TAP_DEBOUNCE_MS: 10 * 1000,
   WEATHER_STALE_MS: 6 * 60 * 60 * 1000,
-
-  // Auto theme — light during the day, dark at night. Driven by Open-Meteo
-  // sunrise/sunset when available, otherwise these fixed hours.
-  THEME_AUTO: true,
-  THEME_DAY_START: 7,   // hour, fallback only
-  THEME_DAY_END: 19,    // hour, fallback only
 };
 
 /* =========================================================================
@@ -42,27 +41,25 @@ const CONFIG = {
  * ========================================================================= */
 
 const state = {
+  view: "month",   // "month" | "week"
   viewedYear: 0,
   viewedMonth: 0, // 0-11
-  events: [],      // occurrences overlapping the 42-day grid of the viewed month
-  todayEvents: [], // today's occurrences, for the "Aujourd'hui" list
-  hasCalendar: false, // the worker holds a successfully parsed feed
-  icsFetchedAt: 0,
-  icsOffline: false,
+  events: [],      // occurrences overlapping the visible range, all calendars
+  todayEvents: [], // today's occurrences, for "Événements du jour"
+  // Per calendar (same index as CALENDARS):
+  //   loaded: the worker holds a parsed feed; tried: a fetch has finished;
+  //   problem: null | "offline" | "missing" (404) | "error" (worker broke);
+  //   fetchedAt: when the feed the worker holds was downloaded.
+  cals: CALENDARS.map(() => ({ loaded: false, tried: false, problem: null, fetchedAt: 0 })),
   focusedDateKey: null, // 'YYYY-MM-DD' of the D-pad focused cell
   todayKey: null,       // 'YYYY-MM-DD' of today, to notice the date changing
   lastInputAt: 0,       // Date.now() of the last keydown/click, for the idle reset
-  refreshSeq: 0,   // drops worker replies for a month we've already left
+  refreshSeq: 0,   // drops worker replies for a range we've already left
   weather: null,
   weatherFetchedAt: 0,
   weatherRefreshing: false,
   lastWeatherTap: 0,
   selectedDateKey: null, // 'YYYY-MM-DD' when day panel open
-
-  // Theme tracking — derived from sunrise/sunset (or fixed hour fallback).
-  sunrise: null,  // ISO string
-  sunset: null,   // ISO string
-  appliedTheme: null,
 };
 
 /* =========================================================================
@@ -73,25 +70,27 @@ const $ = (id) => document.getElementById(id);
 
 const dom = {
   clockTime: $("clock-time"),
-  clockDate: $("clock-date"),
+  clockWeekday: $("clock-weekday"),
+  clockDay: $("clock-day"),
 
   weather: $("weather"),
+  weatherRange: $("weather-range"),
   weatherTemp: $("weather-temp"),
   weatherDesc: $("weather-desc"),
-  weatherMax: $("weather-max"),
-  weatherMin: $("weather-min"),
   weatherIcon: $("weather-icon"),
   weatherHourly: $("weather-hourly"),
 
-  notifList: $("notif-list"),
-
   calTitle: $("cal-title"),
   calStatus: $("cal-status"),
-  calPrev: $("cal-prev"),
-  calNext: $("cal-next"),
   calGrid: $("cal-grid"),
+  calLegend: $("cal-legend"),
   calOverlay: $("cal-overlay"),
   calOverlayMsg: $("cal-overlay-msg"),
+  viewWeek: $("view-week"),
+  viewMonth: $("view-month"),
+
+  todayMeta: $("today-meta"),
+  todayList: $("today-list"),
 
   dayPanel: $("day-panel"),
   dayPanelTitle: $("day-panel-title"),
@@ -110,9 +109,20 @@ function dateKey(d) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+function parseDateKey(key) {
+  const p = key.split("-").map(Number);
+  return new Date(p[0], p[1] - 1, p[2]);
+}
+
 function startOfDay(d) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function addDays(d, n) {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
   return x;
 }
 
@@ -120,6 +130,19 @@ function isSameDay(a, b) {
   return a.getFullYear() === b.getFullYear()
     && a.getMonth() === b.getMonth()
     && a.getDate() === b.getDate();
+}
+
+function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function formatDate(d, opts) { return new Intl.DateTimeFormat("fr-CA", opts).format(d); }
+
+// "8h", "8h30" — the way times are written in Québec.
+function formatHour(d) {
+  return d.getHours() + "h" + (d.getMinutes() ? pad2(d.getMinutes()) : "");
 }
 
 const lsGet = (k) => {
@@ -132,34 +155,59 @@ const lsSet = (k, v) => {
   try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; }
 };
 
+const lsRemove = (k) => {
+  try { localStorage.removeItem(k); } catch (e) { /* storage disabled */ }
+};
+
+/* =========================================================================
+ * Calendars (people) — colors, initials, legend
+ * ========================================================================= */
+
+function calendarOf(ev) {
+  return CALENDARS[ev.calId] || { name: "", color: "" };
+}
+
+function colorClass(ev) {
+  const color = calendarOf(ev).color;
+  return color ? `cal-color--${color}` : "";
+}
+
+function renderLegend() {
+  const named = CALENDARS.filter((c) => c.name);
+  if (!named.length) {
+    dom.calLegend.classList.add("hidden");
+    return;
+  }
+  dom.calLegend.innerHTML = named.map((c) => `
+    <span class="cal-legend-item cal-color--${c.color}">
+      <span class="cal-legend-dot"></span>${escapeHtml(c.name)}
+    </span>`).join("");
+}
+
 /* =========================================================================
  * Clock
  * ========================================================================= */
 
 function tickClock() {
   const now = new Date();
-  // Reference layout shows HH:MM (no seconds) — easier to read at a glance
-  // and lets us run the layout big without a wide third digit pair.
   dom.clockTime.textContent = pad2(now.getHours()) + ":" + pad2(now.getMinutes());
-  dom.clockDate.textContent = new Intl.DateTimeFormat("fr-CA", {
-    weekday: "long", year: "numeric", month: "long", day: "numeric",
-  }).format(now);
+  dom.clockWeekday.textContent = capitalize(formatDate(now, { weekday: "long" }));
+  dom.clockDay.textContent = formatDate(now, { day: "numeric", month: "long", year: "numeric" });
   // Compared on every tick rather than at 00:00:00, which a throttled or
   // late timer can skip.
   if (dateKey(now) !== state.todayKey) followDateChange(now);
   if (Date.now() - state.lastInputAt >= CONFIG.IDLE_RESET_MS) resetToToday();
-  // Re-evaluate theme + refresh notifications on every minute boundary.
-  // Cheap; theme only restyles when the result actually changes, and
-  // notifications re-render quickly from in-memory state.todayEvents.
+  // Events that just ended leave the today list (which can resize the calendar
+  // cells, so the grid re-renders too); the offline age ticks on.
   if (now.getSeconds() === 0) {
-    applyTheme();
     renderCalendarStatus();
-    renderNotifications();
+    renderToday();
+    renderCalendar();
   }
 }
 
 // "Today" moved (midnight, or the clock was corrected): follow it if the grid
-// was showing the old today's month, then recompute today's list and the red square.
+// was showing the old today's month, then recompute today's list and highlight.
 function followDateChange(now) {
   const old = state.todayKey ? parseDateKey(state.todayKey) : null;
   state.todayKey = dateKey(now);
@@ -174,17 +222,22 @@ function followDateChange(now) {
   refreshEventsFromCalendar();
 }
 
-// Nobody has touched the remote for a while: put the wall display back on today.
-// Cheap no-op when it's already there, so the clock can call it every second.
+// Nobody has touched the remote for a while: put the wall display back on
+// today's month. Cheap no-op when it's already there, so the clock can call it every second.
 function resetToToday() {
   if (isDayPanelOpen()) closeDayPanel(); // refocuses state.focusedDateKey when it's gone
   const now = new Date();
   const key = dateKey(now);
-  const onTodayMonth = state.viewedYear === now.getFullYear() && state.viewedMonth === now.getMonth();
-  if (onTodayMonth && state.focusedDateKey === key) return;
+  const onToday = state.view === "month"
+    && state.viewedYear === now.getFullYear() && state.viewedMonth === now.getMonth();
+  if (onToday && state.focusedDateKey === key) return;
   state.focusedDateKey = key;
-  if (onTodayMonth) focusCell(key);
-  else showMonth(now.getFullYear(), now.getMonth());
+  if (onToday) {
+    focusCell(key);
+  } else {
+    state.view = "month";
+    showMonth(now.getFullYear(), now.getMonth());
+  }
 }
 
 function startClock() {
@@ -196,68 +249,41 @@ function startClock() {
   }, drift);
 }
 
-function applyTheme() {
-  if (!CONFIG.THEME_AUTO) return;
-  const now = new Date();
-  let isDay;
-  if (state.sunrise && state.sunset) {
-    const sr = new Date(state.sunrise);
-    const ss = new Date(state.sunset);
-    isDay = now >= sr && now < ss;
-  } else {
-    const h = now.getHours();
-    isDay = h >= CONFIG.THEME_DAY_START && h < CONFIG.THEME_DAY_END;
-  }
-  const next = isDay ? "light" : "dark";
-  if (next !== state.appliedTheme) {
-    document.documentElement.dataset.theme = next;
-    state.appliedTheme = next;
-  }
-}
-
 /* =========================================================================
  * Weather
  * ========================================================================= */
 
-/* WMO weather code → inline SVG icon. Inline so it's offline-resilient
- * and themeable; each icon picks its own colors to stay distinct on dark bg. */
+/* WMO weather code → inline SVG icon. Inline so it's offline-resilient. */
 const WEATHER_ICONS = {
   sunny: `
     <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="32" cy="32" r="11" fill="#ffd166"/>
-      <g stroke="#ffb547" stroke-width="3" stroke-linecap="round">
-        <line x1="32" y1="6"  x2="32" y2="13"/>
-        <line x1="32" y1="51" x2="32" y2="58"/>
-        <line x1="6"  y1="32" x2="13" y2="32"/>
-        <line x1="51" y1="32" x2="58" y2="32"/>
-        <line x1="13.7" y1="13.7" x2="18.6" y2="18.6"/>
-        <line x1="45.4" y1="45.4" x2="50.3" y2="50.3"/>
-        <line x1="13.7" y1="50.3" x2="18.6" y2="45.4"/>
-        <line x1="45.4" y1="18.6" x2="50.3" y2="13.7"/>
+      <circle cx="32" cy="32" r="13" fill="#f7c548"/>
+      <g stroke="#f7c548" stroke-width="3.5" stroke-linecap="round">
+        <line x1="32" y1="5"  x2="32" y2="12"/>
+        <line x1="32" y1="52" x2="32" y2="59"/>
+        <line x1="5"  y1="32" x2="12" y2="32"/>
+        <line x1="52" y1="32" x2="59" y2="32"/>
+        <line x1="12.9" y1="12.9" x2="17.9" y2="17.9"/>
+        <line x1="46.1" y1="46.1" x2="51.1" y2="51.1"/>
+        <line x1="12.9" y1="51.1" x2="17.9" y2="46.1"/>
+        <line x1="46.1" y1="17.9" x2="51.1" y2="12.9"/>
       </g>
     </svg>`,
   partlyCloudy: `
     <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="22" cy="22" r="8" fill="#ffd166"/>
-      <g stroke="#ffb547" stroke-width="2.4" stroke-linecap="round">
-        <line x1="22" y1="6"  x2="22" y2="11"/>
-        <line x1="6"  y1="22" x2="11" y2="22"/>
-        <line x1="10.7" y1="10.7" x2="14.2" y2="14.2"/>
-        <line x1="29.3" y1="10.7" x2="33"   y2="14.2"/>
-      </g>
-      <path d="M19 46c-5 0-9-4-9-9 0-5 4-8 8-9 1-7 7-12 14-12 8 0 14 6 14 14h2c5 0 9 4 9 9s-4 7-9 7H19z"
-            fill="#7d8aa8"/>
+      <circle cx="24" cy="24" r="15" fill="#f7c548"/>
+      <rect x="20" y="30" width="38" height="20" rx="10" fill="#ffffff"/>
     </svg>`,
   cloudy: `
     <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M18 50c-6 0-11-5-11-11 0-6 5-10 10-11 1-7 8-12 16-12 9 0 16 7 16 16 6 0 10 4 10 10s-4 8-10 8H18z"
-            fill="#9aa6c4"/>
+            fill="#ffffff"/>
     </svg>`,
   fog: `
     <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M18 36c-6 0-11-5-11-11 0-6 5-10 10-11 1-7 8-12 16-12 9 0 16 7 16 16 6 0 10 4 10 10s-4 8-10 8H18z"
-            fill="#9aa6c4" opacity="0.85"/>
-      <g stroke="#c8d0e4" stroke-width="3" stroke-linecap="round">
+            fill="#ffffff"/>
+      <g stroke="#8fa3b5" stroke-width="3" stroke-linecap="round">
         <line x1="10" y1="46" x2="54" y2="46"/>
         <line x1="6"  y1="54" x2="48" y2="54"/>
       </g>
@@ -265,8 +291,8 @@ const WEATHER_ICONS = {
   rain: `
     <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M18 38c-6 0-11-5-11-11 0-6 5-10 10-11 1-7 8-12 16-12 9 0 16 7 16 16 6 0 10 4 10 10s-4 8-10 8H18z"
-            fill="#7d8aa8"/>
-      <g stroke="#6aa8ff" stroke-width="3" stroke-linecap="round">
+            fill="#ffffff"/>
+      <g stroke="#3d86d8" stroke-width="3" stroke-linecap="round">
         <line x1="20" y1="46" x2="17" y2="58"/>
         <line x1="32" y1="46" x2="29" y2="58"/>
         <line x1="44" y1="46" x2="41" y2="58"/>
@@ -275,18 +301,18 @@ const WEATHER_ICONS = {
   snow: `
     <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M18 38c-6 0-11-5-11-11 0-6 5-10 10-11 1-7 8-12 16-12 9 0 16 7 16 16 6 0 10 4 10 10s-4 8-10 8H18z"
-            fill="#9aa6c4"/>
-      <g fill="#e8f1ff">
-        <circle cx="20" cy="52" r="2.6"/>
-        <circle cx="32" cy="56" r="2.6"/>
-        <circle cx="44" cy="52" r="2.6"/>
+            fill="#ffffff"/>
+      <g fill="#8fb8e0">
+        <circle cx="20" cy="52" r="2.8"/>
+        <circle cx="32" cy="56" r="2.8"/>
+        <circle cx="44" cy="52" r="2.8"/>
       </g>
     </svg>`,
   thunder: `
     <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M18 36c-6 0-11-5-11-11 0-6 5-10 10-11 1-7 8-12 16-12 9 0 16 7 16 16 6 0 10 4 10 10s-4 8-10 8H18z"
-            fill="#5e6a85"/>
-      <polygon points="32,40 24,52 30,52 26,62 40,46 33,46 37,40" fill="#ffb547"/>
+            fill="#8fa3b5"/>
+      <polygon points="32,40 24,52 30,52 26,62 40,46 33,46 37,40" fill="#f7a531"/>
     </svg>`,
 };
 
@@ -320,89 +346,50 @@ const WMO = {
 function renderWeather(payload, opts = {}) {
   if (!payload) {
     dom.weatherTemp.textContent = "—°";
-    dom.weatherTemp.style.removeProperty("--temp-color");
-    dom.weatherTemp.style.removeProperty("--temp-glow");
     dom.weatherDesc.textContent = "Hors ligne";
-    dom.weatherMax.textContent = "—°";
-    dom.weatherMin.textContent = "—°";
+    dom.weatherRange.textContent = "";
     dom.weatherIcon.innerHTML = "";
-    if (dom.weatherHourly) dom.weatherHourly.innerHTML = "";
+    dom.weatherHourly.innerHTML = "";
     return;
   }
   const cw = payload.current_weather || {};
   const daily = payload.daily || {};
 
-  const temp = Math.round(cw.temperature);
   const code = cw.weathercode;
   const hi = daily.temperature_2m_max ? Math.round(daily.temperature_2m_max[0]) : null;
   const lo = daily.temperature_2m_min ? Math.round(daily.temperature_2m_min[0]) : null;
 
-  dom.weatherTemp.textContent = `${temp}°`;
-  const [tempColor, tempGlow] = tempPalette(temp);
-  dom.weatherTemp.style.setProperty("--temp-color", tempColor);
-  dom.weatherTemp.style.setProperty("--temp-glow", tempGlow);
+  dom.weatherTemp.textContent = `${Math.round(cw.temperature)}°`;
   const desc = WMO[code] != null ? WMO[code] : "—";
-  dom.weatherDesc.innerHTML = opts.stale
-    ? `<span class="stale-dot"></span>${desc}`
-    : desc;
-  dom.weatherMax.textContent = hi != null ? `${hi}°` : "—°";
-  dom.weatherMin.textContent = lo != null ? `${lo}°` : "—°";
+  dom.weatherDesc.innerHTML = opts.stale ? `<span class="stale-dot"></span>${desc}` : desc;
+  dom.weatherRange.textContent = hi != null && lo != null ? `Max ${hi}° · Min ${lo}°` : "";
   dom.weatherIcon.innerHTML = WEATHER_ICONS[pickWeatherIcon(code)] || "";
 
   renderHourly(payload.hourly);
-
-  state.sunrise = (daily.sunrise && daily.sunrise[0]) || null;
-  state.sunset  = (daily.sunset && daily.sunset[0])   || null;
-  applyTheme();
 }
 
 function renderHourly(hourly) {
-  if (!dom.weatherHourly) return;
   if (!hourly || !hourly.time || !hourly.temperature_2m) {
     dom.weatherHourly.innerHTML = "";
     return;
   }
-  // Find current hour index in the hourly.time array (ISO strings without TZ).
+  // Find the current hour in hourly.time (`YYYY-MM-DDTHH:MM` in the requested timezone).
   const now = new Date();
-  const nowKey = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}T${pad2(now.getHours())}`;
+  const nowKey = `${dateKey(now)}T${pad2(now.getHours())}`;
   let idx = hourly.time.findIndex(t => t.startsWith(nowKey));
   if (idx === -1) idx = 0;
 
-  const count = CONFIG.HOURLY_HOURS;
-  const slice = [];
-  for (let i = 0; i < count; i++) {
-    const j = idx + i;
-    if (j >= hourly.time.length) break;
-    slice.push({
-      time: hourly.time[j],
-      temp: Math.round(hourly.temperature_2m[j]),
-      code: hourly.weathercode ? hourly.weathercode[j] : 0,
-    });
-  }
-
-  dom.weatherHourly.innerHTML = slice.map(h => {
-    // Open-Meteo's hourly.time is `YYYY-MM-DDTHH:MM` in the requested timezone.
-    const hh = h.time.slice(11, 13);
-    const label = `${Number(hh)}h`;
-    const icon = WEATHER_ICONS[pickWeatherIcon(h.code)] || "";
-    return `
-      <div class="weather-hour">
-        <span class="weather-hour-time">${label}</span>
-        <span class="weather-hour-icon">${icon}</span>
-        <span class="weather-hour-temp">${h.temp}°</span>
-      </div>
-    `;
-  }).join("");
-}
-
-function tempPalette(t) {
-  if (t <= -10) return ["#7fd8ff", "rgba(127,216,255,0.45)"];
-  if (t <= 0) return ["#a3c4ff", "rgba(163,196,255,0.40)"];
-  if (t <= 10) return ["#cfd9ff", "rgba(207,217,255,0.30)"];
-  if (t <= 20) return ["#ffffff", "rgba(255,255,255,0.20)"];
-  if (t <= 26) return ["#ffd47a", "rgba(255,212,122,0.40)"];
-  if (t <= 32) return ["#ffa86a", "rgba(255,168,106,0.50)"];
-  return ["#ff7a5e", "rgba(255,122,94,0.55)"];
+  dom.weatherHourly.innerHTML = CONFIG.HOURLY_OFFSETS
+    .filter(off => idx + off < hourly.time.length)
+    .map(off => {
+      const j = idx + off;
+      const label = off === 0 ? "Maint." : `${Number(hourly.time[j].slice(11, 13))}h`;
+      return `
+        <div class="weather-hour">
+          <span class="weather-hour-time">${label}</span>
+          <span class="weather-hour-temp">${Math.round(hourly.temperature_2m[j])}°</span>
+        </div>`;
+    }).join("");
 }
 
 async function fetchWeather() {
@@ -449,7 +436,7 @@ function startWeather() {
 }
 
 /* =========================================================================
- * Calendar worker — parses and expands the iCal feed off the UI thread
+ * Calendar worker — parses and expands the iCal feeds off the UI thread
  * ========================================================================= */
 
 let calendarWorker = null;
@@ -465,13 +452,16 @@ function workerFailure(message) {
 }
 
 // Drops a broken worker so the next call starts a fresh one. The fresh worker
-// holds no feed, so the calendar counts as not loaded until the next fetch.
+// holds no feed, so every calendar counts as not loaded until its next fetch.
 function recycleCalendarWorker(err) {
   if (calendarWorker) {
     calendarWorker.terminate();
     calendarWorker = null;
   }
-  state.hasCalendar = false;
+  state.cals.forEach((c) => {
+    c.loaded = false;
+    c.problem = "error";
+  });
   workerPending.forEach((p) => {
     clearTimeout(p.timer);
     p.reject(err);
@@ -518,46 +508,46 @@ function callWorker(msg) {
 }
 
 /* =========================================================================
- * Calendar data — iCal feed via MainActivity's /calendar.ics proxy
+ * Calendar data — one iCal feed per person via MainActivity's /calendar/<n>.ics
  * ========================================================================= */
 
-function showCalendarOverlay(show, msg) {
-  if (!show) {
-    dom.calOverlay.classList.add("hidden");
-    return;
+function anyCalendarLoaded() {
+  return state.cals.some((c) => c.loaded);
+}
+
+// Sunday-based getDay() → Monday-first week, as on Québec wall calendars.
+function mondayOf(d) {
+  const x = startOfDay(d);
+  return addDays(x, -((x.getDay() + 6) % 7));
+}
+
+// Whole weeks covering the month: 4 to 6 rows.
+function monthRange(y, m) {
+  return [mondayOf(new Date(y, m, 1)), addDays(mondayOf(new Date(y, m + 1, 0)), 7)];
+}
+
+function visibleRange() {
+  if (state.view === "week") {
+    const start = mondayOf(parseDateKey(state.focusedDateKey));
+    return [start, addDays(start, 7)];
   }
-  dom.calOverlayMsg.textContent = msg || "Chargement du calendrier…";
-  dom.calOverlay.classList.remove("hidden");
+  return monthRange(state.viewedYear, state.viewedMonth);
 }
 
-function gridRange(y, m) {
-  const start = new Date(y, m, 1 - new Date(y, m, 1).getDay()); // Sunday on or before the 1st
-  const end = new Date(start);
-  end.setDate(end.getDate() + 42);
-  return [start, end];
-}
-
-function parseDateKey(key) {
-  const p = key.split("-").map(Number);
-  return new Date(p[0], p[1] - 1, p[2]);
-}
-
-/* Renders right away from what we have (month changes stay instant), then asks
- * the worker for the viewed grid and today, and re-renders when it answers. */
+/* Renders right away from what we have (navigation stays instant), then asks
+ * the worker for the visible range and today, and re-renders when it answers. */
 function refreshEventsFromCalendar() {
   const seq = ++state.refreshSeq;
+  // Today first: its card's height decides how tall the calendar cells are.
+  renderToday();
   renderCalendar();
-  renderNotifications();
-  if (!state.hasCalendar) return;
+  if (!anyCalendarLoaded()) return;
 
-  const grid = gridRange(state.viewedYear, state.viewedMonth);
+  const range = visibleRange();
   const today = startOfDay(new Date());
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
   requestExpansion(seq, [
-    [grid[0].getTime(), grid[1].getTime()],
-    [today.getTime(), tomorrow.getTime()],
+    [range[0].getTime(), range[1].getTime()],
+    [today.getTime(), addDays(today, 1).getTime()],
   ]);
 }
 
@@ -573,34 +563,42 @@ function requestExpansion(seq, ranges) {
   }
   expansion.busy = true;
   callWorker({ type: "between", ranges }).then((result) => {
-    if (seq !== state.refreshSeq) return; // a newer refresh (month change) superseded us
+    if (seq !== state.refreshSeq) return; // a newer refresh (navigation) superseded us
     state.events = result[0];
     state.todayEvents = result[1];
+    renderToday();
     renderCalendar();
-    renderNotifications();
     if (state.selectedDateKey) renderDayPanelEvents(parseDateKey(state.selectedDateKey));
   }, (err) => {
     console.warn("[calendar] expansion failed:", err);
-    if (err.workerFailure) showCalendarOverlay(true, "Erreur du calendrier");
+    if (err.workerFailure) renderCalendarStatus();
   }).then(() => {
     expansion.busy = false;
     const next = expansion.next;
     expansion.next = null;
     // After a worker failure there's no feed to expand; the next fetch reloads one.
-    if (next && state.hasCalendar) requestExpansion(next.seq, next.ranges);
+    if (next && anyCalendarLoaded()) requestExpansion(next.seq, next.ranges);
   });
 }
 
-// Rejects on an invalid feed and leaves the previously loaded calendar in place.
+// Rejects on an invalid feed and leaves that calendar's previous feed in place.
 // Resolves with whether the text differs from what the worker already held.
-function loadIcsText(text, fetchedAt) {
-  return callWorker({ type: "load", text }).then((result) => {
-    state.hasCalendar = true;
-    state.icsFetchedAt = fetchedAt;
+function loadIcsText(calId, text, fetchedAt) {
+  return callWorker({ type: "load", calId, text }).then((result) => {
+    const c = state.cals[calId];
+    c.loaded = true;
+    c.fetchedAt = fetchedAt;
     renderCalendarStatus();
     refreshEventsFromCalendar();
     return result.changed;
   });
+}
+
+// localStorage keys for a calendar's last good feed. The name is in the key so
+// reordering calendars in local.properties never shows a feed under the wrong person.
+function cacheKeys(calId) {
+  const base = `ics_${calId}_${CALENDARS[calId].name}`;
+  return { text: base + "_text", fetchedAt: base + "_fetched_at" };
 }
 
 function formatAge(ms) {
@@ -609,79 +607,111 @@ function formatAge(ms) {
   return `${Math.round(min / 60)} h`;
 }
 
+function showCalendarOverlay(show, msg) {
+  if (!show) {
+    dom.calOverlay.classList.add("hidden");
+    return;
+  }
+  dom.calOverlayMsg.textContent = msg || "Chargement du calendrier…";
+  dom.calOverlay.classList.remove("hidden");
+}
+
+// The overlay covers the grid until at least one calendar shows; after that,
+// calendars that fail show up in the small status line instead.
 function renderCalendarStatus() {
-  if (!state.icsOffline) {
+  const cals = state.cals;
+  if (!cals.length) {
+    showCalendarOverlay(true, "Calendrier non configuré — voir README");
+  } else if (!anyCalendarLoaded()) {
+    if (cals.some((c) => !c.tried)) showCalendarOverlay(true);
+    else if (cals.some((c) => c.problem === "error")) showCalendarOverlay(true, "Erreur du calendrier");
+    else if (cals.every((c) => c.problem === "missing")) showCalendarOverlay(true, "Calendrier non configuré — voir README");
+    else showCalendarOverlay(true, "Calendrier hors ligne");
+  } else {
+    showCalendarOverlay(false);
+  }
+
+  const failing = cals.map((c, i) => i).filter((i) => cals[i].problem);
+  if (!anyCalendarLoaded() || !failing.length) {
     dom.calStatus.classList.add("hidden");
     return;
   }
-  dom.calStatus.textContent = state.icsFetchedAt
-    ? `Hors ligne · mis à jour il y a ${formatAge(Date.now() - state.icsFetchedAt)}`
-    : "Hors ligne";
+  const names = CALENDARS.length > 1
+    ? ` (${failing.map((i) => CALENDARS[i].name || "?").join(", ")})`
+    : "";
+  const ages = failing.map((i) => cals[i].fetchedAt).filter((t) => t);
+  const age = ages.length
+    ? ` · mis à jour il y a ${formatAge(Date.now() - Math.min.apply(null, ages))}`
+    : "";
+  dom.calStatus.textContent = `Hors ligne${names}${age}`;
   dom.calStatus.classList.remove("hidden");
 }
 
-async function fetchCalendar() {
+async function fetchCalendar(calId) {
+  const c = state.cals[calId];
+  const keys = cacheKeys(calId);
   try {
-    const r = await fetch(CONFIG.ICS_URL, { cache: "no-store" });
+    const r = await fetch(`/calendar/${calId}.ics`, { cache: "no-store" });
     if (r.status === 404) {
-      // IcsProxy answers 404 when no ICAL_URL was set at build time.
-      showCalendarOverlay(true, "Calendrier non configuré — voir README");
+      // IcsProxy answers 404 when this calendar has no URL in the build.
+      c.problem = "missing";
       return;
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const text = await r.text();
     const fetchedAt = Date.now();
-    const changed = await loadIcsText(text, fetchedAt);
-    // The feed can be several MB: rewrite it only when it changed, and keep the
+    const changed = await loadIcsText(calId, text, fetchedAt);
+    // A feed can be several MB: rewrite it only when it changed, and keep the
     // timestamp under its own small key so the offline age stays right.
-    if (changed && !lsSet("ics_text", text)) {
-      console.warn("[calendar] could not cache the feed (storage full?)");
+    if (changed && !lsSet(keys.text, text)) {
+      console.warn("[calendar] could not cache feed", calId, "(storage full?)");
     }
-    lsSet("ics_fetched_at", fetchedAt);
-    state.icsOffline = false;
-    showCalendarOverlay(false);
+    lsSet(keys.fetchedAt, fetchedAt);
+    c.problem = null;
   } catch (err) {
-    console.warn("[calendar] fetch failed:", err);
-    if (err.workerFailure) {
-      if (!state.hasCalendar) showCalendarOverlay(true, "Erreur du calendrier");
-    } else {
-      state.icsOffline = true;
-      if (state.hasCalendar) showCalendarOverlay(false);
-      else showCalendarOverlay(true, "Calendrier hors ligne");
-    }
+    console.warn("[calendar] fetch failed:", calId, err);
+    c.problem = err.workerFailure ? "error" : "offline";
   } finally {
+    c.tried = true;
     renderCalendarStatus();
   }
 }
 
 function startCalendar() {
-  // Show the last good feed right away; the fresh fetch replaces it when it lands.
-  // The first fetch waits for the cached load to settle, so an offline start
-  // doesn't flash "Calendrier hors ligne" before the cached calendar shows.
-  const cachedText = lsGet("ics_text");
-  const cachedLoaded = cachedText
-    ? loadIcsText(cachedText, lsGet("ics_fetched_at") || 0)
-      .then(() => showCalendarOverlay(false))
-      .catch((err) => console.warn("[calendar] cached feed unusable:", err))
-    : Promise.resolve();
-  cachedLoaded.then(fetchCalendar);
-  setInterval(fetchCalendar, CONFIG.ICS_REFRESH_MS);
+  // The single-feed cache of the first landscape version; it only wastes quota now.
+  lsRemove("ics_text");
+  lsRemove("ics_fetched_at");
+
+  renderCalendarStatus();
+  // Show each calendar's last good feed right away; its fresh fetch replaces it
+  // when it lands. The first fetch waits for the cached load to settle, so an
+  // offline start doesn't flash "Calendrier hors ligne" before the cache shows.
+  CALENDARS.forEach((cal, calId) => {
+    const keys = cacheKeys(calId);
+    const cachedText = lsGet(keys.text);
+    const cachedLoaded = cachedText
+      ? loadIcsText(calId, cachedText, lsGet(keys.fetchedAt) || 0)
+        .catch((err) => console.warn("[calendar] cached feed unusable:", calId, err))
+      : Promise.resolve();
+    cachedLoaded.then(() => fetchCalendar(calId));
+  });
+  setInterval(() => CALENDARS.forEach((cal, calId) => fetchCalendar(calId)), CONFIG.ICS_REFRESH_MS);
 }
 
 /* =========================================================================
- * Calendar — month grid
+ * Calendar — month and week grids
  * ========================================================================= */
 
-function monthLabel(y, m) {
-  const s = new Intl.DateTimeFormat("fr-CA", { month: "long", year: "numeric" })
-    .format(new Date(y, m, 1));
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-function classifyEventColor(ev) {
-  // iCal feeds don't carry Google's per-event colorId, so every event uses
-  // the red accent of the reference layout.
-  return "red";
+function calendarTitle(range) {
+  if (state.view === "month") {
+    return capitalize(formatDate(new Date(state.viewedYear, state.viewedMonth, 1), { month: "long", year: "numeric" }));
+  }
+  const first = range[0];
+  const last = addDays(range[1], -1);
+  if (first.getMonth() === last.getMonth()) {
+    return `${first.getDate()} – ${last.getDate()} ${formatDate(last, { month: "long", year: "numeric" })}`;
+  }
+  return `${formatDate(first, { day: "numeric", month: "short" })} – ${formatDate(last, { day: "numeric", month: "short", year: "numeric" })}`;
 }
 
 function eventStart(ev) {
@@ -710,88 +740,90 @@ function eventStartMs(ev) {
   return s ? s.getTime() : 0;
 }
 
-function eventsForDay(day) {
-  const dayStart = startOfDay(day);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
-  return state.events
-    .filter(ev => {
-      const s = eventStart(ev);
-      const e = eventEnd(ev) || s;
-      if (!s) return false;
-      return s < dayEnd && e >= dayStart;
-    })
-    .sort((a, b) => eventStartMs(a) - eventStartMs(b));
+function isAllDay(ev) { return !!(ev.start && ev.start.date); }
+
+function sortEvents(evs) {
+  // All-day first, then by start time.
+  return evs.sort((a, b) => (isAllDay(b) - isAllDay(a)) || (eventStartMs(a) - eventStartMs(b)));
 }
 
+function eventsForDay(day) {
+  const dayStart = startOfDay(day);
+  const dayEnd = addDays(dayStart, 1);
+  return sortEvents(state.events.filter(ev => {
+    const s = eventStart(ev);
+    const e = eventEnd(ev) || s;
+    if (!s) return false;
+    return s < dayEnd && e >= dayStart;
+  }));
+}
+
+function formatEventTime(ev) {
+  if (isAllDay(ev)) return "Toute la journée";
+  return `${formatHour(eventStart(ev))}–${formatHour(eventEnd(ev))}`;
+}
+
+function eventChip(ev, withTime) {
+  const chip = document.createElement("div");
+  chip.className = `cal-chip ${colorClass(ev)}`;
+  if (withTime && !isAllDay(ev)) {
+    const time = document.createElement("span");
+    time.className = "cal-chip-time";
+    time.textContent = formatHour(eventStart(ev));
+    chip.appendChild(time);
+  }
+  chip.appendChild(document.createTextNode(ev.summary || "(sans titre)"));
+  return chip;
+}
+
+// How many one-line chips fit under the day number in a month cell.
+const MONTH_CELL_HEAD_PX = 58; // padding + number row
+const MONTH_CHIP_PX = 38;      // chip + its top margin
+
 function renderCalendar() {
-  const y = state.viewedYear;
-  const m = state.viewedMonth;
-  dom.calTitle.textContent = monthLabel(y, m);
+  const range = visibleRange();
+  const isWeek = state.view === "week";
+  const weeks = Math.round((range[1] - range[0]) / (7 * 24 * 3600 * 1000));
 
-  const gridStart = gridRange(y, m)[0];
+  dom.calTitle.textContent = calendarTitle(range);
+  dom.viewWeek.classList.toggle("is-active", isWeek);
+  dom.viewMonth.classList.toggle("is-active", !isWeek);
+  dom.calGrid.classList.toggle("is-week", isWeek);
+  dom.calGrid.style.gridTemplateRows = `repeat(${weeks}, minmax(0, 1fr))`;
+
+  // Measured, not guessed: a 6-week month has shorter cells than a 5-week one.
+  const rowPx = (dom.calGrid.clientHeight - 10 * (weeks - 1)) / weeks;
+  const maxChips = isWeek ? Infinity : Math.max(1, Math.floor((rowPx - MONTH_CELL_HEAD_PX) / MONTH_CHIP_PX));
+
   const today = new Date();
-
-  // Short month labels for the inline marker on the first day of next month.
-  const monthShort = (d) => {
-    const s = new Intl.DateTimeFormat("fr-CA", { month: "short" }).format(d);
-    // Trim trailing dot ("mai." → "mai") and capitalize.
-    const trimmed = s.replace(/\.$/, "");
-    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
-  };
-
   dom.calGrid.innerHTML = "";
-  for (let i = 0; i < 42; i++) {
-    const cellDate = new Date(gridStart);
-    cellDate.setDate(gridStart.getDate() + i);
-
+  for (let d = new Date(range[0]); d < range[1]; d = addDays(d, 1)) {
+    const cellDate = d;
     const cell = document.createElement("button");
     cell.className = "cal-cell";
     cell.type = "button";
-    if (cellDate.getMonth() !== m) cell.classList.add("is-othermonth");
+    if (!isWeek && cellDate.getMonth() !== state.viewedMonth) cell.classList.add("is-othermonth");
     if (isSameDay(cellDate, today)) cell.classList.add("is-today");
     cell.dataset.date = dateKey(cellDate);
 
-    const numRow = document.createElement("div");
-    numRow.className = "cal-cell-num-row";
-
+    const head = document.createElement("div");
+    head.className = "cal-cell-head";
     const num = document.createElement("div");
     num.className = "cal-cell-num";
     num.textContent = String(cellDate.getDate());
-    numRow.appendChild(num);
-
-    // Inline next-month marker on day 1 of the next month (and on day 1 of
-    // the current month when it's not the first cell of the grid).
-    const isFirstOfMonth = cellDate.getDate() === 1;
-    if (isFirstOfMonth && i > 0) {
-      const lbl = document.createElement("span");
-      lbl.className = "cal-cell-month";
-      lbl.textContent = monthShort(cellDate);
-      numRow.appendChild(lbl);
-    }
-    cell.appendChild(numRow);
+    head.appendChild(num);
+    cell.appendChild(head);
 
     const evs = eventsForDay(cellDate);
-    if (evs.length) {
-      const list = document.createElement("div");
-      list.className = "cal-event-list";
-      const showAll = evs.length <= 3;
-      const visibleCount = showAll ? evs.length : 2;
-      for (const ev of evs.slice(0, visibleCount)) {
-        const bar = document.createElement("div");
-        bar.className = `cal-event-bar bar--${classifyEventColor(ev)}`;
-        bar.textContent = ev.summary || "(sans titre)";
-        bar.title = ev.summary || "";
-        list.appendChild(bar);
-      }
-      if (!showAll) {
-        const more = document.createElement("div");
-        more.className = "cal-event-more";
-        more.textContent = `+${evs.length - visibleCount} autres`;
-        list.appendChild(more);
-      }
-      cell.appendChild(list);
+    // When they don't all fit, the last slot goes to "+N".
+    const shown = evs.length > maxChips ? maxChips - 1 : evs.length;
+    if (evs.length > shown) {
+      const more = document.createElement("span");
+      more.className = "cal-more";
+      more.textContent = `+${evs.length - shown}`;
+      head.appendChild(more);
     }
+    for (const ev of evs.slice(0, shown)) cell.appendChild(eventChip(ev, isWeek));
 
     cell.addEventListener("click", () => {
       state.focusedDateKey = cell.dataset.date;
@@ -803,46 +835,53 @@ function renderCalendar() {
   if (!isDayPanelOpen()) focusCell(state.focusedDateKey);
 }
 
-function renderNotifications() {
-  if (!dom.notifList) return;
-  const now = new Date();
-  const today = startOfDay(now);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+/* =========================================================================
+ * Today's events
+ * ========================================================================= */
 
-  const upcoming = state.todayEvents
-    .filter(ev => {
-      const s = eventStart(ev);
-      const e = eventEnd(ev) || s;
-      if (!s) return false;
-      // Show events that occur today and haven't ended yet.
-      return s < tomorrow && e >= now;
-    })
-    .sort((a, b) => eventStartMs(a) - eventStartMs(b))
-    .slice(0, CONFIG.NOTIF_MAX);
+function todayCard(ev) {
+  const cal = calendarOf(ev);
+  const avatar = cal.name
+    ? `<span class="today-avatar">${escapeHtml(cal.name.charAt(0).toUpperCase())}</span>`
+    : "";
+  return `
+    <div class="today-event ${colorClass(ev)}">
+      ${avatar}
+      <div class="today-text">
+        <div class="today-event-title">${escapeHtml(ev.summary || "(sans titre)")}</div>
+        <div class="today-event-time">${formatEventTime(ev)}</div>
+      </div>
+    </div>`;
+}
+
+function renderToday() {
+  const now = new Date();
+  const all = state.todayEvents;
+  const count = all.length;
+  dom.todayMeta.textContent = (count ? `${count} événement${count > 1 ? "s" : ""} · ` : "")
+    + formatDate(now, { day: "numeric", month: "long" });
+
+  // Only what's still ahead or under way.
+  const upcoming = sortEvents(all.filter(ev => {
+    const s = eventStart(ev);
+    const e = eventEnd(ev) || s;
+    return s && e >= now;
+  }));
 
   if (!upcoming.length) {
-    dom.notifList.innerHTML = `<div class="notif-empty">Aucun événement aujourd'hui</div>`;
+    const msg = count ? "Plus rien aujourd'hui" : "Aucun événement aujourd'hui";
+    dom.todayList.innerHTML = `<div class="today-empty">${msg}</div>`;
     return;
   }
-
-  dom.notifList.innerHTML = upcoming.map(ev => {
-    const color = classifyEventColor(ev);
-    const time = ev.start && ev.start.date
-      ? "Toute la journée"
-      : (() => {
-          const s = eventStart(ev);
-          return `${pad2(s.getHours())}:${pad2(s.getMinutes())}`;
-        })();
-    const title = (ev.summary || "(sans titre)").replace(/</g, "&lt;");
-    return `
-      <div class="notif notif--${color}">
-        <span class="notif-time">${time}</span>
-        <span class="notif-title">${title}</span>
-      </div>
-    `;
-  }).join("");
+  const fits = upcoming.length <= CONFIG.TODAY_MAX;
+  const shown = upcoming.slice(0, fits ? CONFIG.TODAY_MAX : CONFIG.TODAY_MAX - 1);
+  dom.todayList.innerHTML = shown.map(todayCard).join("")
+    + (fits ? "" : `<div class="today-event today-more">+${upcoming.length - shown.length} autres</div>`);
 }
+
+/* =========================================================================
+ * Navigation
+ * ========================================================================= */
 
 // Switches the grid to another month; set state.focusedDateKey first.
 function showMonth(y, m) {
@@ -852,59 +891,38 @@ function showMonth(y, m) {
   refreshEventsFromCalendar(); // re-renders the grid, which restores focus
 }
 
-function changeMonth(delta) {
-  const first = new Date(state.viewedYear, state.viewedMonth + delta, 1);
-  state.focusedDateKey = dateKey(first);
-  showMonth(first.getFullYear(), first.getMonth());
+function toggleView() {
+  state.view = state.view === "month" ? "week" : "month";
+  const d = parseDateKey(state.focusedDateKey);
+  state.viewedYear = d.getFullYear();
+  state.viewedMonth = d.getMonth();
+  refreshEventsFromCalendar();
 }
 
 /* =========================================================================
  * Day panel
  * ========================================================================= */
 
-function formatDayPanelTitle(d) {
-  const s = new Intl.DateTimeFormat("fr-CA", {
-    weekday: "long", month: "long", day: "numeric",
-  }).format(d);
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-function formatEventTime(ev) {
-  if (ev.start && ev.start.date) return "Toute la journée";
-  const s = eventStart(ev);
-  const e = eventEnd(ev);
-  const fmt = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-  return `${fmt(s)} – ${fmt(e)}`;
-}
-
 function renderDayPanelEvents(d) {
   const evs = eventsForDay(d);
-  dom.dayEvents.innerHTML = "";
   if (!evs.length) {
-    const empty = document.createElement("div");
-    empty.className = "day-empty";
-    empty.textContent = "Aucun événement.";
-    dom.dayEvents.appendChild(empty);
+    dom.dayEvents.innerHTML = `<div class="day-empty">Aucun événement.</div>`;
     return;
   }
-  for (const ev of evs) {
-    const row = document.createElement("div");
-    row.className = "day-event";
-    row.innerHTML = `
-      <span class="day-event-stripe stripe--${classifyEventColor(ev)}"></span>
+  dom.dayEvents.innerHTML = evs.map(ev => `
+    <div class="day-event ${colorClass(ev)}">
+      <span class="day-event-stripe"></span>
       <span class="day-event-time">${formatEventTime(ev)}</span>
-      <span class="day-event-title">${(ev.summary || "(sans titre)").replace(/</g, "&lt;")}</span>
-    `;
-    dom.dayEvents.appendChild(row);
-  }
+      <span class="day-event-title">${escapeHtml(ev.summary || "(sans titre)")}</span>
+    </div>`).join("");
 }
 
 function openDayPanel(d) {
   state.selectedDateKey = dateKey(d);
-  dom.dayPanelTitle.textContent = formatDayPanelTitle(d);
+  dom.dayPanelTitle.textContent = capitalize(formatDate(d, { weekday: "long", month: "long", day: "numeric" }));
   renderDayPanelEvents(d);
   dom.dayPanel.classList.remove("hidden");
-  // Force reflow before adding is-open so the transform animates from 100%.
+  // Force reflow before adding is-open so the fade runs.
   void dom.dayPanel.offsetHeight;
   dom.dayPanel.classList.add("is-open");
 }
@@ -912,7 +930,7 @@ function openDayPanel(d) {
 function closeDayPanel() {
   dom.dayPanel.classList.remove("is-open");
   setTimeout(() => {
-    if (isDayPanelOpen()) return; // reopened (quick OK-OK) before the slide-out ended
+    if (isDayPanelOpen()) return; // reopened (quick OK-OK) before the fade-out ended
     dom.dayPanel.classList.add("hidden");
     state.selectedDateKey = null;
     focusCell(state.focusedDateKey);
@@ -920,7 +938,8 @@ function closeDayPanel() {
 }
 
 /* =========================================================================
- * Remote control (D-pad) — arrows move a day/week, OK opens, Back closes
+ * Remote control (D-pad) — arrows move a day/week, OK opens, Back closes,
+ * Menu or Play/Pause (sent by MainActivity) switches month/week
  * ========================================================================= */
 
 const KEY_STEPS = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
@@ -949,11 +968,15 @@ function focusCell(key) {
 }
 
 function moveFocus(days) {
-  const d = parseDateKey(state.focusedDateKey);
-  d.setDate(d.getDate() + days);
+  const before = visibleRange()[0].getTime();
+  const d = addDays(parseDateKey(state.focusedDateKey), days);
   state.focusedDateKey = dateKey(d);
-  if (d.getMonth() !== state.viewedMonth || d.getFullYear() !== state.viewedYear) {
-    showMonth(d.getFullYear(), d.getMonth());
+  const monthChanged = d.getMonth() !== state.viewedMonth || d.getFullYear() !== state.viewedYear;
+  state.viewedYear = d.getFullYear();
+  state.viewedMonth = d.getMonth();
+  if (visibleRange()[0].getTime() !== before) {
+    if (monthChanged && state.view === "month") state.events = [];
+    refreshEventsFromCalendar(); // re-renders the grid, which restores focus
   } else {
     focusCell(state.focusedDateKey);
   }
@@ -981,6 +1004,10 @@ function onKeyDown(e) {
     // preventDefault stops the focused <button> from also firing a click.
     e.preventDefault();
     openDayPanel(parseDateKey(state.focusedDateKey));
+  } else if (key === "v" || key === "ContextMenu") {
+    // Keyboard stand-ins for the remote's Menu key when working on a PC.
+    e.preventDefault();
+    toggleView();
   }
 }
 
@@ -992,13 +1019,18 @@ window.pearboardBack = function () {
   return true;
 };
 
+// Called by MainActivity on the remote's Menu or Play/Pause key.
+window.pearboardToggleView = function () {
+  state.lastInputAt = Date.now(); // these keys never reach the page as keydowns
+  if (isDayPanelOpen()) closeDayPanel();
+  toggleView();
+};
+
 /* =========================================================================
  * Wire up UI events
  * ========================================================================= */
 
 function wireEvents() {
-  dom.calPrev.addEventListener("click", () => changeMonth(-1));
-  dom.calNext.addEventListener("click", () => changeMonth(1));
   dom.dayPanelClose.addEventListener("click", closeDayPanel);
   document.addEventListener("keydown", onKeyDown);
   // Capture phase so the idle timer sees every key and click, whatever handles it.
@@ -1019,12 +1051,11 @@ function init() {
   state.todayKey = dateKey(now);
   state.lastInputAt = Date.now();
 
-  applyTheme();            // pick a theme from the fallback hours immediately
+  renderLegend();
   startClock();
   startWeather();
   wireEvents();
-  showCalendarOverlay(true);
-  refreshEventsFromCalendar(); // empty grid + list until the feed arrives
+  refreshEventsFromCalendar(); // empty grid + list until the feeds arrive
   startCalendar();
 }
 

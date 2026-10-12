@@ -4,5 +4,6 @@ build/
 *.iml
 local.properties
 node_modules/
-# Optional clock background, bundled at build time (personal photo, never committed)
+# Clock background of the first (landscape) version; no longer used, but a personal photo
+# may still sit here and must never be committed
 photo.jpg

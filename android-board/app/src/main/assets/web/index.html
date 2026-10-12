@@ -8,76 +8,78 @@
   <meta name="viewport" content="width=1920,user-scalable=no" />
   <title>Tableau de bord</title>
   <link rel="stylesheet" href="style.css" />
+  <!-- Generated at build time (calendar names and colors, rotation); sets <html data-rotate>
+       before first paint so the page never shows unrotated. -->
+  <script src="config.js"></script>
 </head>
 
 <body>
-  <main class="grid">
+  <!-- The 1080×1920 portrait board, turned to fit the landscape output (style.css). -->
+  <div class="stage" id="stage">
 
-    <section id="clock" class="widget widget--clock">
-      <div class="clock-photo" aria-hidden="true"></div>
-
-      <div class="clock-overlay">
-        <div class="clock-top">
-          <div class="clock-date" id="clock-date">&nbsp;</div>
-          <div class="clock-time" id="clock-time">--:--</div>
+    <div class="top-row">
+      <section class="card card--clock">
+        <div class="clock-time" id="clock-time">--:--</div>
+        <div class="clock-date">
+          <div class="clock-weekday" id="clock-weekday">&nbsp;</div>
+          <div class="clock-day" id="clock-day">&nbsp;</div>
         </div>
+      </section>
 
-        <section class="notifications" id="notifications" aria-live="polite">
-          <div class="notif-label">Aujourd'hui</div>
-          <div class="notif-list" id="notif-list">
-            <div class="notif-empty">—</div>
-          </div>
-        </section>
-
-        <div class="weather-bottom">
-          <div id="weather" class="weather-overlay" role="button" tabindex="0"
-            aria-label="Toucher pour actualiser la météo">
-            <div class="weather-overlay-main">
-              <div class="weather-temp" id="weather-temp">—°</div>
-              <div class="weather-icon" id="weather-icon" aria-hidden="true"></div>
-            </div>
-            <div class="weather-overlay-stats">
-              <span class="weather-overlay-stat"><span class="weather-overlay-stat-label">Max</span><span
-                  id="weather-max">—°</span></span>
-              <span class="weather-overlay-stat"><span class="weather-overlay-stat-label">Min</span><span
-                  id="weather-min">—°</span></span>
-            </div>
-            <span class="weather-overlay-desc" id="weather-desc">&nbsp;</span>
-          </div>
-          <div class="weather-hourly" id="weather-hourly" aria-hidden="true"></div>
+      <section class="card card--weather" id="weather">
+        <div class="weather-head">
+          <span class="weather-city">Montréal</span>
+          <span class="weather-range" id="weather-range">&nbsp;</span>
         </div>
-      </div>
-    </section>
+        <div class="weather-main">
+          <div class="weather-icon" id="weather-icon" aria-hidden="true"></div>
+          <div class="weather-temp" id="weather-temp">—°</div>
+        </div>
+        <div class="weather-desc" id="weather-desc">&nbsp;</div>
+        <div class="weather-hourly" id="weather-hourly"></div>
+      </section>
+    </div>
 
-    <section id="calendar" class="widget widget--calendar">
+    <section class="card card--calendar" id="calendar">
       <header class="cal-header">
-        <button class="cal-nav" id="cal-prev" aria-label="Mois précédent">&larr;</button>
-        <div class="cal-title-wrap">
-          <h2 class="cal-title" id="cal-title">&nbsp;</h2>
-          <div class="cal-status hidden" id="cal-status"></div>
+        <h2 class="cal-title" id="cal-title">&nbsp;</h2>
+        <span class="cal-nav" aria-hidden="true">&lsaquo;</span>
+        <span class="cal-nav" aria-hidden="true">&rsaquo;</span>
+        <div class="cal-status hidden" id="cal-status"></div>
+        <div class="view-toggle" aria-hidden="true">
+          <span class="view-toggle-opt" id="view-week">Semaine</span>
+          <span class="view-toggle-opt" id="view-month">Mois</span>
         </div>
-        <button class="cal-nav" id="cal-next" aria-label="Mois suivant">&rarr;</button>
       </header>
       <div class="cal-weekdays">
-        <span>D</span><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span>
+        <span>Lun</span><span>Mar</span><span>Mer</span><span>Jeu</span><span>Ven</span><span>Sam</span><span>Dim</span>
       </div>
       <div class="cal-grid" id="cal-grid"></div>
+      <div class="cal-legend" id="cal-legend"></div>
 
       <div class="cal-overlay hidden" id="cal-overlay">
-        <div class="cal-overlay-inner">
-          <div class="cal-overlay-msg" id="cal-overlay-msg">Chargement du calendrier…</div>
-        </div>
+        <div class="cal-overlay-msg" id="cal-overlay-msg">Chargement du calendrier…</div>
       </div>
     </section>
 
-  </main>
+    <section class="card card--today">
+      <header class="today-header">
+        <h2 class="today-title">Événements du jour</h2>
+        <span class="today-meta" id="today-meta">&nbsp;</span>
+      </header>
+      <div class="today-list" id="today-list"></div>
+    </section>
 
-  <div class="day-panel hidden" id="day-panel" role="dialog" aria-modal="true" aria-labelledby="day-panel-title">
-    <header class="day-panel-header">
-      <h3 class="day-panel-title" id="day-panel-title">&nbsp;</h3>
-      <button class="day-panel-close" id="day-panel-close" aria-label="Fermer">&times;</button>
-    </header>
-    <div class="day-events" id="day-events"></div>
+    <div class="day-panel hidden" id="day-panel" role="dialog" aria-modal="true" aria-labelledby="day-panel-title">
+      <div class="day-panel-box">
+        <header class="day-panel-header">
+          <h3 class="day-panel-title" id="day-panel-title">&nbsp;</h3>
+          <button class="day-panel-close" id="day-panel-close" aria-label="Fermer">&times;</button>
+        </header>
+        <div class="day-events" id="day-events"></div>
+      </div>
+    </div>
+
   </div>
 
   <script src="app.js" defer></script>

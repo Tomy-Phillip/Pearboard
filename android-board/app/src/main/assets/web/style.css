@@ -8,700 +8,451 @@
 @font-face { font-family: 'DM Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url('fonts/dm-mono-latin-500-normal.woff2') format('woff2'); }
 
 :root {
-  /* --- Surfaces --- */
-  --bg: #07080d;
-  --surface: #0d0e15;
-  --surface-2: #14151f;
-  --border: #1a1b26;
+  --bg: #e8ebe9;
+  --card: #ffffff;
+  --card-weather: #cfe8fb;
+  --line: #eceeed;
+  --chip-neutral: #eef0ef;
 
-  /* --- Text --- */
-  --text: #ffffff;
-  --text-soft: #d8d9ee;
-  --muted: #7a7f95;
-  --muted-2: #3d3f55;
+  --text: #1d2320;
+  --muted: #6b716e;
+  --faint: #b3b8b5;
 
-  /* --- Event/today palette (matches reference image) --- */
-  --today:        #de2a3f;     /* red square around today's number */
-  --today-glow:   rgba(222, 42, 63, 0.45);
-  --bar-red:      #d23d4f;
-  --bar-blue:     #2f6ad9;
-  --bar-green:    #2fa56b;
-  --bar-amber:    #d68a1a;
+  --today-cell: #d9ecfb;
 
-  /* --- Weather temp palette is set inline via JS as --temp-color/--temp-glow --- */
-
-  /* --- Typography --- */
   --font-sans: 'DM Sans', system-ui, -apple-system, Segoe UI, sans-serif;
-  --font-mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-
-  /* --- Photo background ---
-   * android-board/photo.jpg is bundled as assets/web/photo.jpg at build time.
-   * When it's absent the url() layer fails to load and the gradient shows through.
-   */
-  --clock-photo: url('photo.jpg');
-  --clock-photo-fallback:
-    radial-gradient(ellipse 800px 500px at 60% 30%, rgba(255, 180, 80, 0.55), transparent 60%),
-    radial-gradient(ellipse 700px 400px at 30% 80%, rgba(20, 30, 60, 0.6), transparent 70%),
-    linear-gradient(180deg, #2a3450 0%, #d2724b 55%, #3a1d2e 100%);
 }
+
+/* One palette per calendar (config.js gives each calendar one of these names):
+ * chip = event pill, dot = legend dot / stripe, avatar = initial bubble,
+ * soft = background of its "today" card. */
+.cal-color--red    { --c-chip: #fbd2d2; --c-dot: #e57373; --c-avatar: #f5a8a8; --c-soft: #fde8e8; }
+.cal-color--green  { --c-chip: #c9ecd3; --c-dot: #5cb874; --c-avatar: #a2dcb2; --c-soft: #e4f5e9; }
+.cal-color--blue   { --c-chip: #c7e3fc; --c-dot: #4a9be8; --c-avatar: #9fcef6; --c-soft: #e3f0fd; }
+.cal-color--amber  { --c-chip: #f7dfb5; --c-dot: #d39b35; --c-avatar: #ecc687; --c-soft: #fcf1de; }
+.cal-color--purple { --c-chip: #e3d6f7; --c-dot: #9b72d9; --c-avatar: #c8b0f0; --c-soft: #f2ebfb; }
+.cal-color--teal   { --c-chip: #c6ece9; --c-dot: #3eaaa2; --c-avatar: #96d8d2; --c-soft: #e2f5f3; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 *, *::before, *::after { cursor: none; }
 
 html, body {
-  width: 100vw;
-  height: 100vh;
+  width: 1920px;
+  height: 1080px;
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-button { font: inherit; color: inherit; background: none; border: none; outline: none; }
+button { font: inherit; color: inherit; background: none; border: none; outline: none; text-align: left; }
 
 .hidden { display: none !important; }
 
-.grid {
-  width: 100vw;
-  height: 100vh;
-  display: grid;
-  grid-template-columns: 32fr 68fr;
-  grid-template-rows: 1fr;
-}
+/* =========================================================================
+ * Stage — the portrait board. The Fire TV always outputs landscape 1920×1080,
+ * so the 1080×1920 stage is centred on the page and turned to match the TV:
+ * ccw = TV turned anticlockwise (its top on the left), cw = clockwise.
+ * ========================================================================= */
 
-.widget {
-  position: relative;
+.stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1080px;
+  height: 1920px;
+  padding: 36px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
   overflow: hidden;
 }
 
-/* ============================================================
- * Clock widget — photo background with overlay text + weather
- * ============================================================ */
+[data-rotate="ccw"] .stage { left: 420px; top: -420px; transform: rotate(90deg); }
+[data-rotate="cw"] .stage  { left: 420px; top: -420px; transform: rotate(-90deg); }
 
-.widget--clock {
-  grid-column: 1 / 2;
-  background: var(--surface);
-}
+/* Unrotated (dev in a desktop browser): let the page be portrait. */
+html[data-rotate="none"],
+html[data-rotate="none"] body { width: 1080px; height: 1920px; }
 
-.clock-photo {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  background-image: var(--clock-photo), var(--clock-photo-fallback);
-  background-size: cover;
-  background-position: center;
-  z-index: 0;
-}
-
-.clock-photo::after {
-  /* Soft vignette to make text legible regardless of photo */
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  background:
-    linear-gradient(180deg, rgba(0,0,0,0.40) 0%, transparent 35%, transparent 60%, rgba(0,0,0,0.55) 100%),
-    linear-gradient(90deg, rgba(0,0,0,0.30) 0%, transparent 40%);
-}
-
-.clock-overlay {
+.card {
   position: relative;
-  z-index: 1;
-  width: 100%;
-  height: 100%;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  grid-gap: 24px;
-  padding: 28px 32px;
+  background: var(--card);
+  border-radius: 44px;
+  overflow: hidden;
 }
 
-/* Old Fire TV WebViews (~Chromium 61) have no flexbox `gap`, no `inset` and no
- * clamp()/min()/max(): spacing uses child margins, sizes are fixed for the
- * 1920x1080 layout. test/css-compat.test.js guards this. */
+/* =========================================================================
+ * Top row — clock and weather
+ * ========================================================================= */
 
-.clock-top { display: flex; flex-direction: column; }
-.clock-top > * + * { margin-top: 6px; }
-
-.clock-date {
-  font-family: var(--font-sans);
-  font-size: 60px; /* clamp(44px, 4.4vw, 60px) at 1920 wide */
-  font-weight: 600;
-  color: #ffffff;
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
-  letter-spacing: -0.015em;
-  line-height: 1.05;
+.top-row {
+  display: flex;
+  flex: 0 0 420px;
+  margin-bottom: 28px;
 }
 
-.clock-date::first-letter { text-transform: uppercase; }
+.top-row > .card { flex: 1 1 0; min-width: 0; }
+.top-row > .card + .card { margin-left: 28px; }
+
+.card--clock {
+  display: flex;
+  flex-direction: column;
+  padding: 52px 48px 44px;
+}
 
 .clock-time {
-  font-family: var(--font-mono);
-  font-size: 48px; /* clamp(36px, 3.4vw, 48px) at 1920 wide */
-  font-weight: 500;
-  letter-spacing: -0.02em;
+  font-size: 176px;
+  font-weight: 400;
+  letter-spacing: -6px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.85);
-  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
 }
 
-/* ============================================================
- * Weather overlay — bottom of clock, on top of the photo
- * ============================================================ */
+.clock-date { margin-top: auto; }
+.clock-weekday { font-size: 46px; font-weight: 600; line-height: 1.15; }
+.clock-day { font-size: 38px; color: var(--muted); line-height: 1.25; }
 
-.weather-overlay {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  grid-column-gap: 20px;
-  grid-row-gap: 4px;
-  align-items: end;
-  color: #ffffff;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
-}
-
-.weather-overlay-main {
-  grid-column: 1 / 2;
-  grid-row: 1 / 3;
+.card--weather {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  padding: 40px 44px 34px;
+  background: var(--card-weather);
 }
 
-.weather-overlay-main > * + * { margin-left: 18px; }
+.weather-head { display: flex; align-items: baseline; font-size: 32px; }
+.weather-range { margin-left: auto; font-size: 30px; }
 
-.weather-temp {
-  font-family: var(--font-mono);
-  font-size: 100px; /* clamp(72px, 6.5vw, 100px) at 1920 wide */
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  color: var(--temp-color, #ffffff);
-  filter: drop-shadow(0 2px 14px var(--temp-glow, rgba(0, 0, 0, 0.7)));
-  transition: color 240ms ease, filter 240ms ease;
-}
-
-.weather-icon {
-  width: 84px;
-  height: 84px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.5));
-}
-
+.weather-main { display: flex; align-items: center; margin-top: 14px; }
+.weather-icon { width: 120px; height: 120px; flex: none; }
 .weather-icon svg { width: 100%; height: 100%; display: block; }
-
-.weather-overlay-desc {
-  grid-column: 2 / 3;
-  grid-row: 1 / 2;
-  font-size: 22px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.95);
-  align-self: end;
+.weather-temp {
+  margin-left: 22px;
+  font-size: 120px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -3px;
 }
 
-.weather-overlay-stats {
-  grid-column: 2 / 3;
-  grid-row: 2 / 3;
-  display: flex;
-  font-family: var(--font-mono);
-  font-size: 22px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  align-self: start;
-}
+.weather-desc { margin-top: 10px; font-size: 32px; }
 
-.weather-overlay-stats > * + * { margin-left: 22px; }
-
-.weather-overlay-stat {
-  display: inline-flex;
-  align-items: baseline;
-}
-
-.weather-overlay-stat > * + * { margin-left: 8px; }
-
-.weather-overlay-stat-label {
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.10em;
-  color: rgba(255, 255, 255, 0.70);
-}
-
-.weather-overlay-stat:nth-child(1) { color: #ffd29c; }
-.weather-overlay-stat:nth-child(2) { color: #9cdfff; }
-
-/* Stale indicator — show as a small amber dot prefix on the description */
-.weather-overlay-desc .stale-dot {
+.stale-dot {
   display: inline-block;
-  width: 7px;
-  height: 7px;
+  width: 14px;
+  height: 14px;
+  margin-right: 10px;
   border-radius: 50%;
-  background: var(--bar-amber);
-  margin-right: 8px;
+  background: #d39b35;
   vertical-align: middle;
 }
 
-/* ============================================================
- * Notifications panel — middle of the photo column
- * ============================================================ */
-
-.notifications {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  color: #ffffff;
-}
-
-.notif-label {
-  font-family: var(--font-sans);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.65);
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
-  margin-bottom: 12px;
-}
-
-.notif-list {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  flex: 1;
-  min-height: 0;
-}
-
-.notif-list > * + * { margin-top: 8px; }
-
-.notif {
-  display: flex;
-  align-items: center;
-  padding: 10px 12px;
-  background: rgba(0, 0, 0, 0.30);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border-radius: 10px;
-  border-left: 3px solid var(--bar-red);
-}
-
-.notif > * + * { margin-left: 14px; }
-
-.notif.notif--blue   { border-left-color: var(--bar-blue); }
-.notif.notif--green  { border-left-color: var(--bar-green); }
-.notif.notif--amber  { border-left-color: var(--bar-amber); }
-.notif.notif--red    { border-left-color: var(--bar-red); }
-
-.notif-time {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.85);
-  min-width: 56px;
-  font-variant-numeric: tabular-nums;
-}
-
-.notif-title {
-  flex: 1;
-  font-size: 14px;
-  font-weight: 500;
-  color: #ffffff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.notif-empty {
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 14px;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
-}
-
-/* ============================================================
- * Hourly weather strip
- * ============================================================ */
-
-.weather-bottom {
-  display: flex;
-  flex-direction: column;
-}
-
-.weather-bottom > * + * { margin-top: 18px; }
-
 .weather-hourly {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  grid-gap: 10px;
+  display: flex;
+  margin-top: auto;
   padding-top: 18px;
-  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  border-top: 2px solid rgba(29, 35, 32, 0.08);
 }
 
-.weather-hour {
+.weather-hour { flex: 1 1 0; text-align: center; }
+.weather-hour-time { display: block; font-size: 24px; color: var(--muted); }
+.weather-hour-temp { display: block; margin-top: 4px; font-size: 32px; }
+
+/* =========================================================================
+ * Calendar
+ * ========================================================================= */
+
+.card--calendar {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: 16px 6px;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.30);
-}
-
-.weather-hour > * + * { margin-top: 8px; }
-
-.weather-hour-time {
-  font-family: var(--font-mono);
-  font-size: 15px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.80);
-  letter-spacing: 0.02em;
-}
-
-.weather-hour-icon {
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.weather-hour-icon svg { width: 100%; height: 100%; display: block; }
-
-.weather-hour-temp {
-  font-family: var(--font-mono);
-  font-size: 20px;
-  font-weight: 500;
-  color: #ffffff;
-  font-variant-numeric: tabular-nums;
-}
-
-/* ============================================================
- * Calendar widget
- * ============================================================ */
-
-.widget--calendar {
-  grid-column: 2 / 3;
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  padding: 16px 20px 18px;
-  border-left: 1px solid var(--border);
+  padding: 38px 30px 26px;
+  margin-bottom: 28px;
 }
 
 .cal-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  height: 44px;
-  padding: 0 8px;
+  flex: none;
+  padding: 0 4px;
 }
 
-.cal-title {
-  font-size: 20px;
-  font-weight: 500;
-  color: var(--text);
-  letter-spacing: 0.01em;
-}
-
-.cal-title-wrap { display: flex; flex-direction: column; align-items: center; }
-
-.cal-status {
-  margin-top: 2px;
-  font-size: 13px;
-  color: var(--muted);
-  letter-spacing: 0.04em;
-}
+.cal-title { font-size: 44px; font-weight: 600; }
 
 .cal-nav {
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
-  font-size: 18px;
+  width: 54px;
+  height: 54px;
+  margin-left: 14px;
+  border-radius: 50%;
+  background: var(--chip-neutral);
   color: var(--muted);
+  font-size: 34px;
+  line-height: 50px;
+  text-align: center;
+}
+.cal-title + .cal-nav { margin-left: 26px; }
+
+/* Above the title, so a long message never pushes the view toggle. */
+.cal-status { position: absolute; top: 8px; left: 34px; font-size: 22px; color: #b5651d; }
+
+.view-toggle {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 140ms, color 140ms;
+  margin-left: auto;
+  padding: 6px;
+  border-radius: 999px;
+  background: var(--chip-neutral);
 }
 
-.cal-nav:active { background: var(--surface-2); color: var(--text); }
+.view-toggle-opt {
+  padding: 10px 26px;
+  border-radius: 999px;
+  font-size: 28px;
+  color: var(--muted);
+}
+
+.view-toggle-opt.is-active {
+  background: var(--card);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
 
 .cal-weekdays {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  margin-top: 6px;
-  padding: 8px 0;
-}
-
-.cal-weekdays span {
-  text-align: center;
-  font-family: var(--font-sans);
-  font-size: 13px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  flex: none;
+  margin: 26px 0 10px;
+  font-size: 26px;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 500;
+  text-align: center;
 }
 
 .cal-grid {
-  flex: 1;
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  grid-template-rows: repeat(6, 1fr);
-  border-top: 1px solid var(--border);
-  border-left: 1px solid var(--border);
+  flex: 1 1 auto;
   min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-gap: 10px;
 }
 
 .cal-cell {
-  background: transparent;
-  padding: 8px 8px 6px;
   display: flex;
   flex-direction: column;
-  position: relative;
+  min-width: 0;
   min-height: 0;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  transition: background 140ms;
+  padding: 10px 6px 6px;
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: inset 0 3px 0 var(--line);
+  overflow: hidden;
 }
 
-.cal-cell:active { background: var(--surface-2); }
+.cal-cell:focus { outline: none; box-shadow: 0 0 0 5px var(--text); }
 
-/* D-pad focus — has to read from across the room */
-.cal-cell:focus {
-  outline: 4px solid var(--text);
-  outline-offset: -4px;
-  background: var(--surface-2);
-}
+.cal-cell-head { display: flex; align-items: center; flex: none; }
 
 .cal-cell-num {
-  font-family: var(--font-sans);
-  font-size: 17px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-  line-height: 1;
-  padding: 4px 6px;
-  align-self: flex-start;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  margin-left: 2px;
+  font-size: 30px;
+  line-height: 48px;
 }
 
-.cal-cell.is-othermonth .cal-cell-num { color: var(--muted); opacity: 0.55; }
+.cal-cell.is-othermonth .cal-cell-num { color: var(--faint); }
+.cal-cell.is-othermonth .cal-chip,
+.cal-cell.is-othermonth .cal-more { opacity: 0.45; }
 
-/* Today: red square wrapping the day number */
+.cal-cell.is-today { background: var(--today-cell); box-shadow: none; }
+.cal-cell.is-today:focus { box-shadow: 0 0 0 5px var(--text); }
 .cal-cell.is-today .cal-cell-num {
-  background: var(--today);
+  border-radius: 50%;
+  background: var(--text);
   color: #ffffff;
-  font-weight: 600;
-  border-radius: 6px;
-  padding: 4px 9px;
-  box-shadow: 0 0 18px var(--today-glow);
+  text-align: center;
 }
 
-/* Inline next-month label, set by JS on the first day of the next month */
-.cal-cell-month {
-  font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-left: 12px; /* 8px + the row's former 4px flex gap */
-  align-self: flex-end;
-  padding-bottom: 2px;
-}
-
-.cal-cell-num-row {
-  display: flex;
-  align-items: baseline;
-  width: 100%;
-}
-
-/* ---- Event bars ---- */
-
-.cal-event-list {
-  margin-top: 4px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  flex: 1;
-  min-height: 0;
-}
-
-.cal-event-list > * + * { margin-top: 3px; }
-
-.cal-event-bar {
-  font-size: 12px;
+.cal-chip {
+  flex: none;
+  margin-top: 6px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: var(--c-chip, var(--chip-neutral));
+  font-size: 23px;
   font-weight: 500;
   line-height: 1.35;
-  padding: 2px 8px;
-  border-radius: 3px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  letter-spacing: 0.01em;
-  color: #ffffff;
 }
 
-.cal-event-bar.bar--blue   { background: var(--bar-blue); }
-.cal-event-bar.bar--green  { background: var(--bar-green); }
-.cal-event-bar.bar--amber  { background: var(--bar-amber); }
-.cal-event-bar.bar--default,
-.cal-event-bar.bar--red    { background: var(--bar-red); }
+.cal-chip-time { display: block; font-size: 20px; font-weight: 400; color: rgba(29, 35, 32, 0.7); }
 
-.cal-event-more {
-  font-family: var(--font-sans);
-  font-size: 11px;
-  color: var(--muted);
-  padding-left: 8px;
-  font-weight: 500;
+.cal-more { margin-left: auto; padding-right: 6px; font-size: 22px; color: var(--muted); }
+
+/* Week view: one row of tall days, events with their times, titles on two lines. */
+.cal-grid.is-week .cal-cell-num { font-size: 34px; }
+.cal-grid.is-week .cal-chip {
+  margin-top: 10px;
+  padding: 6px 8px;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
-/* 1px + the list's 3px spacing; more specific than `.cal-event-list > * + *` */
-.cal-event-list > .cal-event-more { margin-top: 4px; }
+.cal-legend {
+  display: flex;
+  justify-content: center;
+  flex: none;
+  margin-top: 18px;
+  padding-top: 20px;
+  border-top: 2px solid var(--line);
+  font-size: 32px;
+}
 
-/* Status overlay over the calendar (loading, offline, not configured, error) */
+.cal-legend-item { display: flex; align-items: center; margin: 0 22px; }
+.cal-legend-dot {
+  width: 22px;
+  height: 22px;
+  margin-right: 12px;
+  border-radius: 50%;
+  background: var(--c-dot);
+}
+
 .cal-overlay {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   left: 0;
-  background: rgba(7, 8, 13, 0.92);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 5;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(255, 255, 255, 0.82);
 }
-
-.cal-overlay-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 0 24px;
-}
-
-.cal-overlay-inner > * + * { margin-top: 22px; }
 
 .cal-overlay-msg {
-  color: var(--text-soft);
-  font-size: 15px;
-  letter-spacing: 0.08em;
+  font-size: 30px;
+  letter-spacing: 3px;
   text-transform: uppercase;
+  color: var(--muted);
 }
 
-/* ============================================================
- * Day panel — read-only list of the selected day's events
- * ============================================================ */
+/* =========================================================================
+ * Today's events
+ * ========================================================================= */
 
-.day-panel {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 50vh;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  border-radius: 16px 16px 0 0;
-  padding: 20px 28px 28px;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  transform: translateY(100%);
-  transition: transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
-  box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.55);
+.card--today {
+  flex: none;
+  padding: 38px 36px 36px;
 }
 
-.day-panel.is-open { transform: translateY(0); }
+.today-header { display: flex; align-items: baseline; margin-bottom: 26px; }
+.today-title { font-size: 42px; font-weight: 600; }
+.today-meta { margin-left: auto; font-size: 28px; color: var(--muted); }
 
-.day-panel::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 8px;
-  width: 56px;
-  height: 4px;
-  margin-left: -28px;
-  background: var(--border);
-  border-radius: 2px;
+.today-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-gap: 18px;
 }
 
-.day-panel-header {
+.today-event {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 6px;
-  margin-bottom: 16px;
+  min-width: 0;
+  height: 112px;
+  padding: 0 24px;
+  border-radius: 28px;
+  background: var(--c-soft, var(--chip-neutral));
 }
 
-.day-panel-title { font-size: 20px; font-weight: 500; color: var(--text); }
-
-.day-panel-close {
-  width: 48px;
-  height: 48px;
-  font-size: 28px;
-  color: var(--muted);
-  border-radius: 8px;
+.today-avatar {
+  flex: none;
+  width: 68px;
+  height: 68px;
+  margin-right: 22px;
+  border-radius: 50%;
+  background: var(--c-avatar);
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 68px;
+  text-align: center;
 }
 
-.day-panel-close:active { background: var(--border); color: var(--text); }
+.today-text { min-width: 0; }
+.today-event-title {
+  font-size: 34px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.today-event-time { font-size: 27px; color: var(--muted); }
 
-.day-events {
-  flex: 1;
-  overflow-y: auto;
+.today-more { justify-content: center; font-size: 30px; color: var(--muted); }
+
+.today-empty { font-size: 30px; color: var(--muted); }
+
+/* =========================================================================
+ * Day panel — every event of one day, opened with OK
+ * ========================================================================= */
+
+.day-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(29, 35, 32, 0.4);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.day-panel.is-open { opacity: 1; }
+
+.day-panel-box {
+  position: absolute;
+  left: 80px;
+  right: 80px;
+  top: 340px;
+  max-height: 1240px;
   display: flex;
   flex-direction: column;
-  padding-right: 4px;
+  padding: 44px;
+  border-radius: 44px;
+  background: var(--card);
 }
 
-.day-events > * + * { margin-top: 6px; }
+.day-panel-header { display: flex; align-items: center; flex: none; margin-bottom: 26px; }
+.day-panel-title { font-size: 44px; font-weight: 600; }
+.day-panel-close { margin-left: auto; font-size: 54px; line-height: 1; color: var(--muted); }
 
-.day-events::-webkit-scrollbar { width: 6px; }
-.day-events::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.day-events { overflow-y: auto; min-height: 0; }
 
 .day-event {
   display: flex;
   align-items: center;
-  padding: 12px 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  min-height: 56px;
+  padding: 18px 0;
+  border-top: 2px solid var(--line);
 }
 
-.day-event > * + * { margin-left: 14px; }
-
-.day-event-stripe { width: 4px; height: 30px; border-radius: 2px; }
-.day-event-stripe.stripe--blue    { background: var(--bar-blue); }
-.day-event-stripe.stripe--green   { background: var(--bar-green); }
-.day-event-stripe.stripe--amber   { background: var(--bar-amber); }
-.day-event-stripe.stripe--default { background: var(--bar-red); }
-.day-event-stripe.stripe--red     { background: var(--bar-red); }
-
-.day-event-time {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--muted);
-  min-width: 130px;
+.day-event-stripe {
+  flex: none;
+  width: 10px;
+  height: 56px;
+  margin-right: 22px;
+  border-radius: 5px;
+  background: var(--c-dot, var(--faint));
 }
 
-.day-event-title { font-size: 15px; color: var(--text); flex: 1; }
+.day-event-time { flex: none; width: 250px; font-size: 30px; color: var(--muted); }
+.day-event-title { font-size: 34px; }
 
-.day-empty {
-  color: var(--muted);
-  font-size: 14px;
-  padding: 20px 0;
-  text-align: center;
-}
+.day-empty { font-size: 32px; color: var(--muted); }

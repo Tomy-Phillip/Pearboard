@@ -1,35 +1,53 @@
 # Pearboard — Android TV / Fire TV
 
-App Android TV (`com.pearboard.tv`) qui affiche le tableau de bord en plein écran :
-horloge, météo (Open-Meteo, Montréal) et calendrier Google en lecture seule.
-L'interface est une page web (`app/src/main/assets/web/`) affichée dans une WebView,
-conçue en 1920×1080 et mise à l'échelle de l'écran. Cible : Fire TV sous Fire OS 6
-(≈ Android 7.1, API 25) ou plus récent.
+App Android TV (`com.pearboard.tv`) qui affiche le tableau de bord familial en plein
+écran, pour une TV posée **à la verticale** : horloge, météo (Open-Meteo, Montréal),
+calendrier Google en lecture seule (un agenda par personne, chacun sa couleur) et
+événements du jour. L'interface est une page web (`app/src/main/assets/web/`) affichée
+dans une WebView. Une Fire TV sort toujours une image horizontale : l'app dessine donc
+le tableau en 1080×1920 et le fait pivoter d'un quart de tour pour qu'il soit droit une
+fois la TV tournée. Cible : Fire TV sous Fire OS 6 (≈ Android 7.1, API 25) ou plus récent.
 
 ## Configuration (une fois)
 
-1. **Adresse iCal secrète** : dans Google Agenda sur ordinateur → ⚙ Paramètres →
-   votre agenda (colonne de gauche) → *Intégrer l'agenda* → **Adresse secrète au format iCal**.
-2. Mettez-la dans `android-board/local.properties` (ignoré par git, créé par Android Studio) :
+1. **Adresses iCal secrètes** : pour chaque personne, dans Google Agenda sur ordinateur →
+   ⚙ Paramètres → son agenda (colonne de gauche) → *Intégrer l'agenda* →
+   **Adresse secrète au format iCal**.
+2. Mettez-les dans `android-board/local.properties` (ignoré par git, créé par Android Studio) :
 
    ```properties
    sdk.dir=C\:\\Users\\<vous>\\AppData\\Local\\Android\\Sdk
-   ICAL_URL=https://calendar.google.com/calendar/ical/.../private-.../basic.ics
+
+   CAL_1_NAME=Tomy
+   CAL_1_URL=https://calendar.google.com/calendar/ical/.../private-.../basic.ics
+   CAL_2_NAME=Lily
+   CAL_2_URL=https://calendar.google.com/calendar/ical/.../private-.../basic.ics
+   CAL_2_COLOR=blue
+
+   # Sens dans lequel la TV est tournée : ccw (anti-horaire, par défaut), cw (horaire)
+   # ou none (pas de rotation).
+   ROTATION=ccw
    ```
 
-   Sans `ICAL_URL`, l'app fonctionne mais le calendrier affiche
-   « Calendrier non configuré ».
-3. **Photo (optionnelle)** : un fichier `android-board/photo.jpg` (ignoré par git) sert de
-   fond à l'horloge. Pour la retirer : supprimez le fichier, puis `./gradlew clean` avant
-   de reconstruire.
+   - Numérotez à partir de 1 (`CAL_1_…`, `CAL_2_…`, … jusqu'à 20).
+   - Le nom apparaît dans la légende et son initiale sur les événements du jour.
+   - `CAL_n_COLOR` est facultatif : `red`, `green`, `blue`, `amber`, `purple` ou `teal`
+     (sinon, dans cet ordre).
+   - Une seule ligne `ICAL_URL=…` (l'ancienne configuration) marche encore : un agenda
+     sans nom ni légende.
+   - Sans aucun agenda, l'app fonctionne mais affiche « Calendrier non configuré ».
+3. Si l'image est à l'envers une fois la TV tournée, inversez `ROTATION` (`ccw` ↔ `cw`)
+   et reconstruisez.
 
 À savoir :
 
 - Le flux iCal de Google a du retard (de quelques minutes à quelques heures) sur les
   modifications faites dans l'agenda, et ne contient pas les couleurs des événements.
   L'app le relit toutes les 10 minutes.
-- **Ne partagez pas l'APK** : l'adresse secrète y est incluse et récupérable. Si elle a
-  fuité, réinitialisez-la dans Google Agenda (même écran) et reconstruisez.
+- Un événement présent dans deux agendas (invitation partagée) apparaît deux fois, une
+  fois par personne.
+- **Ne partagez pas l'APK** : les adresses secrètes y sont incluses et récupérables. Si
+  l'une a fuité, réinitialisez-la dans Google Agenda (même écran) et reconstruisez.
 
 ## Construire
 
@@ -63,12 +81,13 @@ relancer le même `adb install -r`.
 | Touche | Action |
 | --- | --- |
 | ← / → | Jour précédent / suivant |
-| ↑ / ↓ | Semaine précédente / suivante (change de mois au besoin) ; dans le panneau du jour, fait défiler la liste |
+| ↑ / ↓ | Semaine précédente / suivante (change de mois ou de semaine au besoin) ; dans le panneau du jour, fait défiler la liste |
 | OK | Ouvre les événements du jour sélectionné (lecture seule) ; referme le panneau s'il est ouvert |
+| Menu (≡) ou Lecture/Pause | Bascule entre la vue Mois et la vue Semaine |
 | Retour | Ferme le panneau du jour ; sinon quitte l'app |
 
-Sans aucune touche pendant 5 minutes, le panneau se ferme et l'affichage revient à
-aujourd'hui.
+Sans aucune touche pendant 5 minutes, le panneau se ferme et l'affichage revient au
+mois en cours, sur aujourd'hui.
 
 ## Développer l'interface sur PC
 
@@ -77,11 +96,13 @@ Node.js ≥ 21 requis. Depuis `android-board/` :
 ```bash
 npm install
 npm test        # tests (analyse iCal, compatibilité vieux WebView)
-npm run dev     # http://localhost:8123/web/index.html avec un calendrier d'exemple
-ICS_FILE=/chemin/vers/agenda.ics npm run dev   # avec un autre fichier .ics
+npm run dev     # http://localhost:8123/web/index.html avec deux agendas d'exemple
+DEV_CALENDARS="Tomy=/chemin/a.ics;Lily=/chemin/b.ics" npm run dev   # avec vos fichiers .ics
+ROTATION=ccw npm run dev   # tourné comme sur la TV (par défaut : droit, en portrait)
 ```
 
-Dans le navigateur, les flèches et Entrée simulent la télécommande, Échap simule Retour.
+Dans le navigateur, les flèches et Entrée simulent la télécommande, Échap simule Retour
+et `v` simule Menu (vue Mois / Semaine).
 `npm run vendor` et `npm run vendor-fonts` recopient `ical.js` et les polices DM Sans /
 DM Mono depuis `node_modules` vers les assets après une mise à jour de ces dépendances.
 

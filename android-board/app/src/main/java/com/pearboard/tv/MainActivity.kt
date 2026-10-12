@@ -6,6 +6,7 @@ import android.app.Activity
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.RenderProcessGoneDetail
@@ -37,7 +38,8 @@ class MainActivity : Activity() {
             settings.domStorageEnabled = true // localStorage caches (weather, iCal)
             // Assets come through WebViewAssetLoader over https, never file://.
             settings.allowFileAccess = false
-            // Honour <meta viewport width=1920> and scale the 1080p layout to the screen.
+            // Honour <meta viewport width=1920> and scale the 1080p page to the screen
+            // (the portrait layout is drawn rotated inside it, see style.css).
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
             webViewClient = PearboardWebViewClient(assetLoader, ::onRendererGone)
@@ -68,6 +70,18 @@ class MainActivity : Activity() {
         }
     }
 
+    // Menu (≡) and Play/Pause switch between the month and week views. Handled here
+    // because the WebView doesn't hand these keys to the page as usable keydowns.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode in VIEW_TOGGLE_KEYS) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && !webViewDestroyed) {
+                webView.evaluateJavascript("window.pearboardToggleView && window.pearboardToggleView()", null)
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onResume() {
         super.onResume()
         if (!webViewDestroyed) webView.onResume()
@@ -83,6 +97,15 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
+    private companion object {
+        val VIEW_TOGGLE_KEYS = setOf(
+            KeyEvent.KEYCODE_MENU,
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_PLAY,
+            KeyEvent.KEYCODE_MEDIA_PAUSE,
+        )
+    }
+
     private class PearboardWebViewClient(
         private val assetLoader: WebViewAssetLoader,
         private val onRendererGone: () -> Unit,
@@ -92,10 +115,15 @@ class MainActivity : Activity() {
             request: WebResourceRequest,
         ): WebResourceResponse? {
             val url = request.url
-            if (url.host == WebViewAssetLoader.DEFAULT_DOMAIN && url.path == "/calendar.ics") {
-                return IcsProxy.fetch()
+            if (url.host == WebViewAssetLoader.DEFAULT_DOMAIN) {
+                val calendar = CALENDAR_PATH.matchEntire(url.path ?: "")
+                if (calendar != null) return IcsProxy.fetch(calendar.groupValues[1].toInt())
             }
             return assetLoader.shouldInterceptRequest(url)
+        }
+
+        companion object {
+            private val CALENDAR_PATH = Regex("/calendar/(\\d{1,2})\\.ics")
         }
 
         // Only called on API 26+; returning true keeps the app process alive.
