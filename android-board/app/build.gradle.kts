@@ -49,6 +49,10 @@ val photosToken: String = localProp("PHOTOS_TOKEN")
 require(photosUrl.isEmpty() || photosToken.isNotEmpty()) {
     "PHOTOS_URL is set in local.properties but PHOTOS_TOKEN is missing"
 }
+// The token rides on every request to PHOTOS_URL: never over plain http.
+require(photosUrl.isEmpty() || photosUrl.startsWith("https://")) {
+    "PHOTOS_URL in local.properties must start with https:// (the TV token is sent to it)"
+}
 
 val configAssetsDir = layout.buildDirectory.dir("generated/config-assets")
 

@@ -31,18 +31,22 @@ object PhotoProxy {
         val seen = SEEN.matchEntire(path)
         return when {
             method == "GET" && path == "/photos/messages" -> forward("GET", "$base/api/tv/messages")
-            method == "GET" && photo != null -> forward("GET", "$base/api/tv/photo/${photo.groupValues[1]}")
+            // A photo never changes under its id: the WebView may keep it for a day.
+            method == "GET" && photo != null ->
+                forward("GET", "$base/api/tv/photo/${photo.groupValues[1]}", "private, max-age=86400")
             method == "POST" && seen != null -> forward("POST", "$base/api/tv/messages/${seen.groupValues[1]}/seen")
             else -> plain(404, "Not found")
         }
     }
 
-    private fun forward(method: String, url: String): WebResourceResponse = try {
+    private fun forward(method: String, url: String, cacheControl: String = "no-store"): WebResourceResponse = try {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = CONNECT_TIMEOUT_MS
             conn.readTimeout = READ_TIMEOUT_MS
             conn.requestMethod = method
+            // The token goes to PHOTOS_URL only, never on to wherever a redirect points.
+            conn.instanceFollowRedirects = false
             conn.setRequestProperty("Authorization", "Bearer ${BuildConfig.PHOTOS_TOKEN}")
             if (method == "POST") {
                 conn.doOutput = true
@@ -50,19 +54,25 @@ object PhotoProxy {
                 conn.outputStream.close()
             }
             val status = conn.responseCode
-            val stream = if (status < 400) conn.inputStream else conn.errorStream
-            val body = stream?.use { it.readBytes() } ?: ByteArray(0)
-            val mime = (conn.contentType ?: "application/octet-stream").substringBefore(';').trim()
-            if (status >= 400) Log.w(TAG, "$method ${URL(url).path} → HTTP $status")
-            WebResourceResponse(
-                mime, "utf-8", status, conn.responseMessage?.takeIf { it.isNotBlank() } ?: "Status",
-                mapOf("Cache-Control" to "no-store"), ByteArrayInputStream(body),
-            )
+            if (status in 300..399) {
+                Log.w(TAG, "$method ${URL(url).path} → HTTP $status (redirects aren't followed)")
+                plain(502, "Redirected")
+            } else {
+                val stream = if (status < 400) conn.inputStream else conn.errorStream
+                val body = stream?.use { it.readBytes() } ?: ByteArray(0)
+                val mime = (conn.contentType ?: "application/octet-stream").substringBefore(';').trim()
+                if (status >= 400) Log.w(TAG, "$method ${URL(url).path} → HTTP $status")
+                WebResourceResponse(
+                    mime, "utf-8", status, conn.responseMessage?.takeIf { it.isNotBlank() } ?: "Status",
+                    mapOf("Cache-Control" to if (status < 300) cacheControl else "no-store"),
+                    ByteArrayInputStream(body),
+                )
+            }
         } finally {
             conn.disconnect()
         }
     } catch (e: Exception) {
-        // Also covers a 3xx (WebResourceResponse rejects those) and a mistyped PHOTOS_URL.
+        // Also covers a mistyped PHOTOS_URL.
         Log.w(TAG, "$method ${url.substringAfter("/api/")} failed", e)
         plain(502, "Fetch failed")
     }
