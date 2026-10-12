@@ -13,7 +13,7 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "pearboard-photos"
 # Filled in from `wrangler d1 create pearboard-photos` (see README). Not a secret.
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "b7911c39-4f42-4154-add6-7db48d049b47"
 migrations_dir = "migrations"
 
 [[r2_buckets]]
