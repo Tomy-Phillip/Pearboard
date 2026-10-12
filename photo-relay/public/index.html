@@ -1,3 +1,30 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>Pearboard — photos</title>
+<html lang="fr-CA">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pearboard — photos</title>
+  <link rel="stylesheet" href="upload.css">
+</head>
+<body>
+  <main>
+    <h1>Envoyer au Pearboard</h1>
+
+    <form id="form">
+      <label class="pick" id="pick">
+        <input type="file" id="file" accept="image/*" hidden>
+        <img id="preview" alt="" hidden>
+        <span id="pick-label">Choisir une photo</span>
+      </label>
+      <textarea id="text" maxlength="200" rows="3" placeholder="Votre message (facultatif)"></textarea>
+      <div class="count"><span id="count">0</span> / 200</div>
+      <button type="submit" id="send" disabled>Envoyer au Pearboard</button>
+      <p class="status" id="status" role="status"></p>
+    </form>
+
+    <h2>Derniers envois</h2>
+    <ul class="history" id="history"></ul>
+  </main>
+  <script src="upload.js" type="module"></script>
+</body>
+</html>

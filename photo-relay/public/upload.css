@@ -1,0 +1,28 @@
+:root { --bg: #f2f4f3; --card: #fff; --text: #1d2320; --muted: #6b716e; --accent: #1d2320; --ok: #2f8a4c; --err: #b3261e; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0d1012; --card: #191d20; --text: #e8ebe9; --muted: #949b97; --accent: #e8ebe9; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, sans-serif; }
+main { max-width: 560px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 24px; margin: 8px 0 16px; }
+h2 { font-size: 18px; margin: 28px 0 12px; }
+form { background: var(--card); border-radius: 20px; padding: 16px; display: grid; gap: 12px; }
+.pick { display: grid; place-items: center; min-height: 180px; border: 2px dashed var(--muted); border-radius: 14px; overflow: hidden; cursor: pointer; }
+.pick img { width: 100%; max-height: 420px; object-fit: contain; display: block; }
+.pick img[hidden] { display: none; } /* the rule above would otherwise override [hidden] */
+#pick-label { padding: 24px; font-weight: 600; }
+.pick.has-photo { border-style: solid; }
+.pick.has-photo #pick-label { display: none; }
+textarea { width: 100%; font: inherit; padding: 12px; border-radius: 12px; border: 1px solid var(--muted); background: transparent; color: inherit; resize: vertical; }
+.count { text-align: right; color: var(--muted); font-size: 13px; margin-top: -8px; }
+button { font: inherit; font-weight: 600; padding: 14px; border: 0; border-radius: 12px; background: var(--accent); color: var(--bg); }
+button:disabled { opacity: 0.4; }
+.status { margin: 0; min-height: 1.4em; }
+.status.ok { color: var(--ok); }
+.status.err { color: var(--err); }
+.history { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.history li { display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: center; background: var(--card); border-radius: 14px; padding: 8px; }
+.history img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; }
+.history .meta { color: var(--muted); font-size: 13px; }
+.history .del { background: transparent; color: var(--err); padding: 8px; font-weight: 500; }
