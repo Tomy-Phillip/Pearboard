@@ -24,6 +24,7 @@
           <div class="clock-weekday" id="clock-weekday">&nbsp;</div>
           <div class="clock-day" id="clock-day">&nbsp;</div>
         </div>
+        <div class="photo-warning hidden" id="photo-warning">Photos : jeton refusé</div>
       </section>
 
       <section class="card card--weather" id="weather">
@@ -80,8 +81,21 @@
       </div>
     </div>
 
+    <!-- A photo sent from the phone (photo-relay/): full screen until a key is pressed. -->
+    <div class="photo-view hidden" id="photo-view">
+      <img class="photo-img" id="photo-img" alt="" />
+      <div class="photo-caption">
+        <div class="photo-text" id="photo-text"></div>
+        <div class="photo-meta">
+          <span id="photo-from"></span>
+          <span class="photo-count" id="photo-count"></span>
+        </div>
+      </div>
+    </div>
+
   </div>
 
+  <script src="photo-queue.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 

@@ -9,6 +9,10 @@
 const BOARD = window.PEARBOARD || { rotation: "none", calendars: [] };
 const CALENDARS = BOARD.calendars; // [{ name, color }], index = calId
 
+// Remote photos (photo-relay/): on when the build has a PHOTOS_URL.
+const photos = BOARD.photos && window.PhotoQueue ? window.PhotoQueue.create() : null;
+const photoView = { showing: false, loadingId: null, polling: false };
+
 const CONFIG = {
   ICS_REFRESH_MS: 10 * 60 * 1000,
   // Backstop for a worker that never answers; the first parse of a real feed
@@ -39,6 +43,8 @@ const CONFIG = {
   WEATHER_REFRESH_MS: 5 * 60 * 1000,
   WEATHER_TAP_DEBOUNCE_MS: 10 * 1000,
   WEATHER_STALE_MS: 6 * 60 * 60 * 1000,
+
+  PHOTOS_POLL_MS: 30 * 1000, // remote photos, when config.js says photos: true
 };
 
 /* =========================================================================
@@ -101,6 +107,13 @@ const dom = {
   dayPanelTitle: $("day-panel-title"),
   dayPanelClose: $("day-panel-close"),
   dayEvents: $("day-events"),
+
+  photoView: $("photo-view"),
+  photoImg: $("photo-img"),
+  photoText: $("photo-text"),
+  photoFrom: $("photo-from"),
+  photoCount: $("photo-count"),
+  photoWarning: $("photo-warning"),
 };
 
 /* =========================================================================
@@ -209,6 +222,7 @@ function tickClock() {
     renderCalendarStatus();
     renderToday();
     renderCalendar();
+    if (photoView.showing) renderPhotoMeta();
   }
 }
 
@@ -634,7 +648,9 @@ function cacheKeys(calId) {
 function formatAge(ms) {
   const min = Math.max(1, Math.round(ms / 60000));
   if (min < 60) return `${min} min`;
-  return `${Math.round(min / 60)} h`;
+  const hours = Math.round(min / 60);
+  if (hours < 24) return `${hours} h`;
+  return `${Math.round(hours / 24)} j`;
 }
 
 function showCalendarOverlay(show, msg) {
@@ -910,6 +926,93 @@ function renderToday() {
 }
 
 /* =========================================================================
+ * Remote photos — polled through MainActivity's /photos/* proxy
+ * ========================================================================= */
+
+function renderPhotoMeta() {
+  const m = photos.current();
+  if (!m) return;
+  dom.photoText.textContent = m.text || "";
+  dom.photoFrom.textContent = `de ${m.author} · il y a ${formatAge(Date.now() - m.createdAt)}`;
+  dom.photoCount.textContent = photos.size() > 1 ? `1 / ${photos.size()}` : "";
+}
+
+// Preloads the queue's first photo, then shows it; with an empty queue, back to the board.
+function showCurrentPhoto() {
+  const m = photos.current();
+  if (!m) {
+    photoView.showing = false;
+    dom.photoView.classList.add("hidden");
+    dom.photoImg.removeAttribute("src");
+    focusCell(state.focusedDateKey);
+    return;
+  }
+  if (photoView.loadingId === m.id) return;
+  photoView.loadingId = m.id;
+  const img = new Image();
+  img.onload = () => {
+    photoView.loadingId = null;
+    if (photos.current() !== m) return; // dismissed or skipped meanwhile
+    dom.photoImg.src = img.src;
+    renderPhotoMeta();
+    dom.photoView.classList.remove("hidden");
+    photoView.showing = true;
+  };
+  img.onerror = () => {
+    photoView.loadingId = null;
+    console.warn("[photos] photo failed to load:", m.id);
+    if (photos.current() === m) photos.skip(); // not marked seen: the next poll retries it
+    showCurrentPhoto();
+  };
+  img.src = `/photos/photo/${m.id}`;
+}
+
+// Any remote key while a photo is up: pass it (marked seen) and show the next.
+function advancePhoto() {
+  if (photoView.loadingId) return; // next photo still loading; ignore extra presses
+  photos.dismiss();
+  sendSeen();
+  showCurrentPhoto();
+}
+
+async function sendSeen() {
+  for (const id of photos.unsentSeen()) {
+    try {
+      const r = await fetch(`/photos/seen/${id}`, { method: "POST" });
+      // 404: deleted from the upload page meanwhile, nothing left to report.
+      if (r.ok || r.status === 404) photos.markSent(id);
+    } catch (err) {
+      console.warn("[photos] seen not sent, will retry:", id, err);
+    }
+  }
+}
+
+async function pollPhotos() {
+  if (photoView.polling) return;
+  photoView.polling = true;
+  try {
+    await sendSeen();
+    const r = await fetch("/photos/messages", { cache: "no-store" });
+    dom.photoWarning.classList.toggle("hidden", r.status !== 401);
+    if (!r.ok) return;
+    const body = await r.json();
+    photos.merge(body.messages || []);
+    if (photoView.showing) renderPhotoMeta();
+    else showCurrentPhoto();
+  } catch (err) {
+    console.warn("[photos] poll failed:", err);
+  } finally {
+    photoView.polling = false;
+  }
+}
+
+function startPhotos() {
+  if (!photos) return;
+  pollPhotos();
+  setInterval(pollPhotos, CONFIG.PHOTOS_POLL_MS);
+}
+
+/* =========================================================================
  * Navigation
  * ========================================================================= */
 
@@ -1044,6 +1147,7 @@ function onKeyDown(e) {
 // Called by MainActivity on the remote's Back key. Returns true when consumed.
 window.pearboardBack = function () {
   state.lastInputAt = Date.now(); // Back never reaches the page as a keydown
+  if (photoView.showing) { advancePhoto(); return true; }
   if (!isDayPanelOpen()) return false;
   closeDayPanel();
   return true;
@@ -1052,6 +1156,7 @@ window.pearboardBack = function () {
 // Called by MainActivity on the remote's Menu or Play/Pause key.
 window.pearboardToggleView = function () {
   state.lastInputAt = Date.now(); // these keys never reach the page as keydowns
+  if (photoView.showing) { advancePhoto(); return; }
   if (isDayPanelOpen()) closeDayPanel();
   toggleView();
 };
@@ -1062,11 +1167,18 @@ window.pearboardToggleView = function () {
 
 function wireEvents() {
   dom.dayPanelClose.addEventListener("click", closeDayPanel);
-  document.addEventListener("keydown", onKeyDown);
   // Capture phase so the idle timer sees every key and click, whatever handles it.
   const markInput = () => { state.lastInputAt = Date.now(); };
   document.addEventListener("keydown", markInput, true);
   document.addEventListener("click", markInput, true);
+  // A photo on screen takes every key: it moves to the next photo and does nothing else.
+  document.addEventListener("keydown", (e) => {
+    if (!photoView.showing) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (!e.repeat) advancePhoto();
+  }, true);
+  document.addEventListener("keydown", onKeyDown);
 }
 
 /* =========================================================================
@@ -1088,6 +1200,7 @@ function init() {
   wireEvents();
   refreshEventsFromCalendar(); // empty grid + list until the feeds arrive
   startCalendar();
+  startPhotos();
 }
 
 if (document.readyState === "loading") {
