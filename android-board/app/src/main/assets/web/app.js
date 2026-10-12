@@ -11,7 +11,7 @@ const CALENDARS = BOARD.calendars; // [{ name, color }], index = calId
 
 // Remote photos (photo-relay/): on when the build has a PHOTOS_URL.
 const photos = BOARD.photos && window.PhotoQueue ? window.PhotoQueue.create() : null;
-const photoView = { showing: false, loadingId: null, polling: false };
+const photoView = { showing: false, loadingId: null, polling: false, swallowRepeats: false };
 
 const CONFIG = {
   ICS_REFRESH_MS: 10 * 60 * 1000,
@@ -222,7 +222,8 @@ function tickClock() {
     renderCalendarStatus();
     renderToday();
     renderCalendar();
-    if (photoView.showing) renderPhotoMeta();
+    // Not while the next photo loads: its caption comes up with it.
+    if (photoView.showing && !photoView.loadingId) renderPhotoMeta();
   }
 }
 
@@ -932,8 +933,12 @@ function renderToday() {
 function renderPhotoMeta() {
   const m = photos.current();
   if (!m) return;
-  dom.photoText.textContent = m.text || "";
-  dom.photoFrom.textContent = `de ${m.author} · il y a ${formatAge(Date.now() - m.createdAt)}`;
+  dom.photoText.textContent = m.text;
+  // Each part only when the server sent it.
+  const from = [];
+  if (m.author) from.push(`de ${m.author}`);
+  if (Number.isFinite(m.createdAt)) from.push(`il y a ${formatAge(Date.now() - m.createdAt)}`);
+  dom.photoFrom.textContent = from.join(" · ");
   dom.photoCount.textContent = photos.size() > 1 ? `1 / ${photos.size()}` : "";
 }
 
@@ -941,10 +946,11 @@ function renderPhotoMeta() {
 function showCurrentPhoto() {
   const m = photos.current();
   if (!m) {
+    if (!photoView.showing) return; // nothing up: leave focus and the DOM alone
     photoView.showing = false;
     dom.photoView.classList.add("hidden");
     dom.photoImg.removeAttribute("src");
-    focusCell(state.focusedDateKey);
+    if (!isDayPanelOpen()) focusCell(state.focusedDateKey);
     return;
   }
   if (photoView.loadingId === m.id) return;
@@ -952,8 +958,15 @@ function showCurrentPhoto() {
   const img = new Image();
   img.onload = () => {
     photoView.loadingId = null;
-    if (photos.current() !== m) return; // dismissed or skipped meanwhile
-    dom.photoImg.src = img.src;
+    photos.loaded(m.id);
+    // Dismissed or skipped meanwhile: show whatever is first now instead of stalling.
+    if (photos.current() !== m) { showCurrentPhoto(); return; }
+    // The preloaded element itself goes on screen, so the photo is downloaded once.
+    img.className = "photo-img";
+    img.id = "photo-img";
+    img.alt = "";
+    dom.photoImg.parentNode.replaceChild(img, dom.photoImg);
+    dom.photoImg = img;
     renderPhotoMeta();
     dom.photoView.classList.remove("hidden");
     photoView.showing = true;
@@ -961,7 +974,7 @@ function showCurrentPhoto() {
   img.onerror = () => {
     photoView.loadingId = null;
     console.warn("[photos] photo failed to load:", m.id);
-    if (photos.current() === m) photos.skip(); // not marked seen: the next poll retries it
+    if (photos.current() === m) photos.skip(); // not marked seen: a later poll retries it, with backoff
     showCurrentPhoto();
   };
   img.src = `/photos/photo/${m.id}`;
@@ -997,8 +1010,8 @@ async function pollPhotos() {
     if (!r.ok) return;
     const body = await r.json();
     photos.merge(body.messages || []);
-    if (photoView.showing) renderPhotoMeta();
-    else showCurrentPhoto();
+    if (!photoView.showing) showCurrentPhoto();
+    else if (!photoView.loadingId) renderPhotoMeta(); // the next photo's caption comes with it
   } catch (err) {
     console.warn("[photos] poll failed:", err);
   } finally {
@@ -1173,11 +1186,20 @@ function wireEvents() {
   document.addEventListener("click", markInput, true);
   // A photo on screen takes every key: it moves to the next photo and does nothing else.
   document.addEventListener("keydown", (e) => {
+    if (photoView.swallowRepeats && e.repeat) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     if (!photoView.showing) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (!e.repeat) advancePhoto();
+    if (e.repeat) return;
+    advancePhoto();
+    // That was the last photo: the key, still held, mustn't go on to move around the board.
+    if (!photoView.showing) photoView.swallowRepeats = true;
   }, true);
+  document.addEventListener("keyup", () => { photoView.swallowRepeats = false; }, true);
   document.addEventListener("keydown", onKeyDown);
 }
 
