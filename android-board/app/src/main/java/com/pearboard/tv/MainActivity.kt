@@ -118,6 +118,7 @@ class MainActivity : Activity() {
             if (url.host == WebViewAssetLoader.DEFAULT_DOMAIN) {
                 val calendar = CALENDAR_PATH.matchEntire(url.path ?: "")
                 if (calendar != null) return IcsProxy.fetch(calendar.groupValues[1].toInt())
+                PhotoProxy.handle(request.method, url.path ?: "")?.let { return it }
             }
             return assetLoader.shouldInterceptRequest(url)
         }

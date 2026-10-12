@@ -42,6 +42,14 @@ val rotation: String = localProp("ROTATION").lowercase().ifEmpty { "ccw" }.also 
     require(it in listOf("ccw", "cw", "none")) { "ROTATION=$it in local.properties: use ccw, cw or none" }
 }
 
+// Remote photos (photo-relay/): Worker address and the TV's token. Both optional;
+// without PHOTOS_URL the feature is off.
+val photosUrl: String = localProp("PHOTOS_URL").trimEnd('/')
+val photosToken: String = localProp("PHOTOS_TOKEN")
+require(photosUrl.isEmpty() || photosToken.isNotEmpty()) {
+    "PHOTOS_URL is set in local.properties but PHOTOS_TOKEN is missing"
+}
+
 val configAssetsDir = layout.buildDirectory.dir("generated/config-assets")
 
 fun javaString(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
@@ -62,6 +70,8 @@ android {
             "String[]", "CALENDAR_URLS",
             calendars.joinToString(", ", "new String[] {", "}") { javaString(it.url) },
         )
+        buildConfigField("String", "PHOTOS_URL", javaString(photosUrl))
+        buildConfigField("String", "PHOTOS_TOKEN", javaString(photosToken))
     }
 
     buildFeatures {
@@ -84,6 +94,7 @@ val webConfigJson: String = groovy.json.JsonOutput.toJson(
     mapOf(
         "rotation" to rotation,
         "calendars" to calendars.map { mapOf("name" to it.name, "color" to it.color) },
+        "photos" to photosUrl.isNotEmpty(),
     ),
 )
 val writeWebConfig by tasks.registering {
