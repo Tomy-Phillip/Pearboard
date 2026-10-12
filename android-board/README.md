@@ -1,9 +1,10 @@
 # Pearboard — Android TV / Fire TV
 
 App Android TV (`com.pearboard.tv`) qui affiche le tableau de bord familial en plein
-écran, pour une TV posée **à la verticale** : horloge, météo (Open-Meteo, Montréal),
+écran, pour une TV posée **à la verticale** : horloge, météo (Open-Meteo, Sherbrooke),
 calendrier Google en lecture seule (un agenda par personne, chacun sa couleur) et
-événements du jour. L'interface est une page web (`app/src/main/assets/web/`) affichée
+événements du jour. L'affichage passe en mode nuit (thème sombre) du coucher au lever
+du soleil à Sherbrooke, et revient au thème clair le matin. L'interface est une page web (`app/src/main/assets/web/`) affichée
 dans une WebView. Une Fire TV sort toujours une image horizontale : l'app dessine donc
 le tableau en 1080×1920 et le fait pivoter d'un quart de tour pour qu'il soit droit une
 fois la TV tournée. Cible : Fire TV sous Fire OS 6 (≈ Android 7.1, API 25) ou plus récent.
@@ -100,6 +101,9 @@ npm run dev     # http://localhost:8123/web/index.html avec deux agendas d'exemp
 DEV_CALENDARS="Tomy=/chemin/a.ics;Lily=/chemin/b.ics" npm run dev   # avec vos fichiers .ics
 ROTATION=ccw npm run dev   # tourné comme sur la TV (par défaut : droit, en portrait)
 ```
+
+Ajoutez `?theme=dark` ou `?theme=light` à l'adresse pour forcer un thème sans attendre
+le coucher du soleil.
 
 Dans le navigateur, les flèches et Entrée simulent la télécommande, Échap simule Retour
 et `v` simule Menu (vue Mois / Semaine).

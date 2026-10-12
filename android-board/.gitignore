@@ -4,6 +4,8 @@ build/
 *.iml
 local.properties
 node_modules/
+# Git Bash crash logs (Windows)
+*.stackdump
 # Clock background of the first (landscape) version; no longer used, but a personal photo
 # may still sit here and must never be committed
 photo.jpg

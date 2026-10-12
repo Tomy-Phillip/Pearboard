@@ -20,11 +20,16 @@ const CONFIG = {
 
   WEATHER_URL:
     "https://api.open-meteo.com/v1/forecast" +
-    "?latitude=45.5088&longitude=-73.5878" +
+    "?latitude=45.4042&longitude=-71.8929" + // Sherbrooke
     "&current_weather=true" +
     "&hourly=temperature_2m,weathercode" +
-    "&daily=temperature_2m_max,temperature_2m_min" +
+    "&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset" +
     "&timezone=America/Toronto&forecast_days=2",
+
+  // Night mode: dark between sunset and sunrise (from the weather feed), or
+  // outside these hours while no forecast has arrived yet.
+  NIGHT_FALLBACK_START: 19,
+  NIGHT_FALLBACK_END: 7,
 
   // Hours from now shown under the weather ("Maint.", +2 h, …).
   HOURLY_OFFSETS: [0, 2, 4, 6, 8],
@@ -200,6 +205,7 @@ function tickClock() {
   // Events that just ended leave the today list (which can resize the calendar
   // cells, so the grid re-renders too); the offline age ticks on.
   if (now.getSeconds() === 0) {
+    applyTheme();
     renderCalendarStatus();
     renderToday();
     renderCalendar();
@@ -237,6 +243,29 @@ function resetToToday() {
   } else {
     state.view = "month";
     showMonth(now.getFullYear(), now.getMonth());
+  }
+}
+
+/* Night mode: <html data-theme="dark"> between today's sunset and sunrise in
+ * Sherbrooke. The weather feed's daily.sunrise/sunset are local "YYYY-MM-DDTHH:MM"
+ * strings (no offset), which Date reads as local time. */
+function isNight(now) {
+  const daily = state.weather && state.weather.daily;
+  const i = daily && daily.time ? daily.time.indexOf(dateKey(now)) : -1;
+  if (i !== -1 && daily.sunrise && daily.sunset) {
+    return now < new Date(daily.sunrise[i]) || now >= new Date(daily.sunset[i]);
+  }
+  const h = now.getHours();
+  return h >= CONFIG.NIGHT_FALLBACK_START || h < CONFIG.NIGHT_FALLBACK_END;
+}
+
+// ?theme=dark|light pins the theme (dev server only; the TV loads index.html bare).
+const FORCED_THEME = (/[?&]theme=(light|dark)\b/.exec(location.search) || [])[1];
+
+function applyTheme() {
+  const theme = FORCED_THEME || (isNight(new Date()) ? "dark" : "light");
+  if (document.documentElement.getAttribute("data-theme") !== theme) {
+    document.documentElement.setAttribute("data-theme", theme);
   }
 }
 
@@ -366,6 +395,7 @@ function renderWeather(payload, opts = {}) {
   dom.weatherIcon.innerHTML = WEATHER_ICONS[pickWeatherIcon(code)] || "";
 
   renderHourly(payload.hourly);
+  applyTheme(); // sunrise/sunset may have just arrived
 }
 
 function renderHourly(hourly) {
@@ -815,8 +845,8 @@ function renderCalendar() {
     cell.appendChild(head);
 
     const evs = eventsForDay(cellDate);
-    // When they don't all fit, the last slot goes to "+N".
-    const shown = evs.length > maxChips ? maxChips - 1 : evs.length;
+    // What doesn't fit is counted as "+N" beside the day number.
+    const shown = Math.min(evs.length, maxChips);
     if (evs.length > shown) {
       const more = document.createElement("span");
       more.className = "cal-more";
@@ -1052,6 +1082,7 @@ function init() {
   state.lastInputAt = Date.now();
 
   renderLegend();
+  applyTheme(); // from the fallback hours until the weather (cached or fresh) arrives
   startClock();
   startWeather();
   wireEvents();

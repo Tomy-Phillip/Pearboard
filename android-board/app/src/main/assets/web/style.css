@@ -19,8 +19,33 @@
   --faint: #b3b8b5;
 
   --today-cell: #d9ecfb;
+  --today-num-fg: #ffffff;
+  --hairline: rgba(29, 35, 32, 0.08);
+  --overlay: rgba(255, 255, 255, 0.82);
+  --scrim: rgba(29, 35, 32, 0.4);
+  --warning: #b5651d;
 
   --font-sans: 'DM Sans', system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+/* Night mode (app.js sets data-theme="dark" between sunset and sunrise). */
+[data-theme="dark"] {
+  --bg: #0d1012;
+  --card: #191d20;
+  --card-weather: #15304a;
+  --line: #262b2f;
+  --chip-neutral: #262b2f;
+
+  --text: #e8ebe9;
+  --muted: #949b97;
+  --faint: #4d5450;
+
+  --today-cell: #1c3956;
+  --today-num-fg: #191d20;
+  --hairline: rgba(255, 255, 255, 0.1);
+  --overlay: rgba(25, 29, 32, 0.85);
+  --scrim: rgba(0, 0, 0, 0.55);
+  --warning: #e0a060;
 }
 
 /* One palette per calendar (config.js gives each calendar one of these names):
@@ -32,6 +57,14 @@
 .cal-color--amber  { --c-chip: #f7dfb5; --c-dot: #d39b35; --c-avatar: #ecc687; --c-soft: #fcf1de; }
 .cal-color--purple { --c-chip: #e3d6f7; --c-dot: #9b72d9; --c-avatar: #c8b0f0; --c-soft: #f2ebfb; }
 .cal-color--teal   { --c-chip: #c6ece9; --c-dot: #3eaaa2; --c-avatar: #96d8d2; --c-soft: #e2f5f3; }
+
+/* Same hues, deep enough for light text at night. */
+[data-theme="dark"] .cal-color--red    { --c-chip: #5c2b2f; --c-avatar: #8c4046; --c-soft: #2e2023; }
+[data-theme="dark"] .cal-color--green  { --c-chip: #24492f; --c-avatar: #3b7049; --c-soft: #1c2a21; }
+[data-theme="dark"] .cal-color--blue   { --c-chip: #1f3f60; --c-avatar: #33608f; --c-soft: #1a2633; }
+[data-theme="dark"] .cal-color--amber  { --c-chip: #57431c; --c-avatar: #85672b; --c-soft: #2c261b; }
+[data-theme="dark"] .cal-color--purple { --c-chip: #3e2f5c; --c-avatar: #5f4a8c; --c-soft: #241f30; }
+[data-theme="dark"] .cal-color--teal   { --c-chip: #1d4a47; --c-avatar: #2f716c; --c-soft: #1a2b2a; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 *, *::before, *::after { cursor: none; }
@@ -154,7 +187,7 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
   display: flex;
   margin-top: auto;
   padding-top: 18px;
-  border-top: 2px solid rgba(29, 35, 32, 0.08);
+  border-top: 2px solid var(--hairline);
 }
 
 .weather-hour { flex: 1 1 0; text-align: center; }
@@ -197,7 +230,7 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
 .cal-title + .cal-nav { margin-left: 26px; }
 
 /* Above the title, so a long message never pushes the view toggle. */
-.cal-status { position: absolute; top: 8px; left: 34px; font-size: 22px; color: #b5651d; }
+.cal-status { position: absolute; top: 8px; left: 34px; font-size: 22px; color: var(--warning); }
 
 .view-toggle {
   display: flex;
@@ -273,7 +306,7 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
 .cal-cell.is-today .cal-cell-num {
   border-radius: 50%;
   background: var(--text);
-  color: #ffffff;
+  color: var(--today-num-fg);
   text-align: center;
 }
 
@@ -291,7 +324,7 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
   text-overflow: ellipsis;
 }
 
-.cal-chip-time { display: block; font-size: 20px; font-weight: 400; color: rgba(29, 35, 32, 0.7); }
+.cal-chip-time { display: block; font-size: 20px; font-weight: 400; opacity: 0.75; }
 
 .cal-more { margin-left: auto; padding-right: 6px; font-size: 22px; color: var(--muted); }
 
@@ -334,7 +367,7 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--overlay);
 }
 
 .cal-overlay-msg {
@@ -410,7 +443,7 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
   right: 0;
   bottom: 0;
   left: 0;
-  background: rgba(29, 35, 32, 0.4);
+  background: var(--scrim);
   opacity: 0;
   transition: opacity 200ms ease;
 }
