@@ -1,6 +1,8 @@
 name = "pearboard-photos"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
+# Preview URLs would sit outside the Access application, so turn them off.
+preview_urls = false
 
 # The upload page (public/) is served as static assets; /api/* reaches the Worker.
 [assets]

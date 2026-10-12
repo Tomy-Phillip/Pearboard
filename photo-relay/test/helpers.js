@@ -29,7 +29,21 @@ export function tvFetch(path, init = {}, token = env.TV_TOKEN) {
   return fetchPath(path, Object.assign({}, init, { headers }));
 }
 
+// Image bytes: a real magic-byte prefix, padded with zeros up to `size`.
+export const MAGIC = {
+  jpeg: [0xff, 0xd8, 0xff, 0xe0],
+  png: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  webp: [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50],
+};
+
+export function imageBytes(kind = "jpeg", size = 1000) {
+  const bytes = new Uint8Array(size);
+  bytes.set(MAGIC[kind]);
+  return bytes;
+}
+
 // A Cloudflare Access JWT signed with the test key (see vitest.config.js).
+// email: null leaves the claim out.
 export async function accessJwt({
   email = "tomy@example.com",
   aud = env.ACCESS_AUD,
@@ -37,7 +51,7 @@ export async function accessJwt({
   expiresIn = "1h",
 } = {}) {
   const key = await importJWK(JSON.parse(env.TEST_ACCESS_PRIVATE_JWK), "RS256");
-  return new SignJWT({ email })
+  return new SignJWT(email === null ? {} : { email })
     .setProtectedHeader({ alg: "RS256", kid: "test" })
     .setIssuer(issuer)
     .setAudience(aud)

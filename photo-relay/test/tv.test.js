@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
-import { insertMessage, tvFetch, newId } from "./helpers.js";
+import { fetchPath, insertMessage, tvFetch, newId } from "./helpers.js";
 
 describe("TV token", () => {
   it("rejects a missing token", async () => {
@@ -11,6 +11,21 @@ describe("TV token", () => {
   it("rejects a wrong token", async () => {
     const res = await tvFetch("/api/tv/messages", {}, "wrong");
     expect(res.status).toBe(401);
+  });
+
+  it("rejects Basic auth", async () => {
+    const res = await fetchPath("/api/tv/messages", { headers: { Authorization: "Basic xyz" } });
+    expect(res.status).toBe(401);
+  });
+
+  it("doesn't open the page API: /api/tvx", async () => {
+    const res = await tvFetch("/api/tvx");
+    expect(res.status).toBe(403);
+  });
+
+  it("doesn't open the page API: /api/tv/../messages", async () => {
+    const res = await tvFetch("/api/tv/../messages");
+    expect(res.status).toBe(403);
   });
 });
 
@@ -34,11 +49,14 @@ describe("GET /api/tv/messages", () => {
 });
 
 describe("GET /api/tv/photo/:id", () => {
-  it("serves the photo with its content type", async () => {
+  it("serves the photo with its content type and defensive headers", async () => {
     const id = await insertMessage({ photo: "abc" });
     const res = await tvFetch(`/api/tv/photo/${id}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("image/jpeg");
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Content-Security-Policy")).toBe("default-src 'none'; sandbox");
+    expect(res.headers.get("Content-Disposition")).toBe("inline");
     expect(await res.text()).toBe("abc");
   });
 
@@ -70,6 +88,12 @@ describe("POST /api/tv/messages/:id/seen", () => {
 
   it("404s an unknown id", async () => {
     const res = await tvFetch(`/api/tv/messages/${newId()}/seen`, { method: "POST" });
+    expect(res.status).toBe(404);
+  });
+
+  it("404s a GET", async () => {
+    const id = await insertMessage();
+    const res = await tvFetch(`/api/tv/messages/${id}/seen`);
     expect(res.status).toBe(404);
   });
 });

@@ -2,8 +2,9 @@ import path from "node:path";
 import { defineWorkersConfig, readD1Migrations } from "@cloudflare/vitest-pool-workers/config";
 import { generateKeyPair, exportJWK } from "jose";
 
-// Tests sign their own Cloudflare Access JWTs: a throwaway key pair whose public
-// half the Worker trusts through ACCESS_JWKS_JSON (test-only binding).
+// Tests sign their own Cloudflare Access JWTs with a throwaway key pair. The public
+// half (TEST_ACCESS_JWKS_JSON) is served at the team's certs URL by fetchMock, see
+// test/access-keys.js; the Worker itself has no test hook.
 export default defineWorkersConfig(async () => {
   const migrations = await readD1Migrations(path.join(import.meta.dirname, "migrations"));
   const { publicKey, privateKey } = await generateKeyPair("RS256", { extractable: true });
@@ -11,7 +12,7 @@ export default defineWorkersConfig(async () => {
   const priv = Object.assign(await exportJWK(privateKey), { kid: "test", alg: "RS256" });
   return {
     test: {
-      setupFiles: ["./test/apply-migrations.js"],
+      setupFiles: ["./test/apply-migrations.js", "./test/access-keys.js"],
       poolOptions: {
         workers: {
           singleWorker: true,
@@ -23,7 +24,7 @@ export default defineWorkersConfig(async () => {
               ACCESS_TEAM_DOMAIN: "test.cloudflareaccess.com",
               ACCESS_AUD: "test-aud",
               AUTHORS: "tomy@example.com=Tomy",
-              ACCESS_JWKS_JSON: JSON.stringify({ keys: [pub] }),
+              TEST_ACCESS_JWKS_JSON: JSON.stringify({ keys: [pub] }),
               TEST_ACCESS_PRIVATE_JWK: JSON.stringify(priv),
             },
           },

@@ -44,8 +44,15 @@ async function photoResponse(env, id) {
   if (!row) return notFound();
   const obj = await env.PHOTOS.get(row.photo_key);
   if (!obj) return notFound();
+  // The bytes came from a sender: never let a browser sniff or run them as a page.
   return new Response(obj.body, {
-    headers: { "Content-Type": row.content_type, "Cache-Control": "private, max-age=86400" },
+    headers: {
+      "Content-Type": row.content_type,
+      "Cache-Control": "private, max-age=86400",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Content-Disposition": "inline",
+    },
   });
 }
 
@@ -77,8 +84,17 @@ async function handleTv(request, env, path) {
 
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 const MAX_TEXT_CHARS = 200;
-const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const HISTORY_LIMIT = 30;
+
+// The photo's real type, from its first bytes (the declared type is the sender's
+// word for it), or null if it's none we accept.
+function sniffPhotoType(bytes) {
+  const at = (offset, sig) => sig.every((b, i) => bytes[offset + i] === b);
+  if (at(0, [0xff, 0xd8, 0xff])) return "image/jpeg";
+  if (at(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png";
+  if (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])) return "image/webp"; // RIFF….WEBP
+  return null;
+}
 
 function newId() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -86,10 +102,11 @@ function newId() {
 }
 
 // The signed-in sender's email, or null. DEV_ACCESS_EMAIL (in .dev.vars) stands in
-// for Access under `wrangler dev`, and only for requests to localhost.
+// for Access under `wrangler dev`: only for requests to localhost, and only where
+// Access isn't configured (no ACCESS_AUD), so a stray secret can't open production.
 async function accessEmail(request, env, url) {
   const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-  if (env.DEV_ACCESS_EMAIL && local) return env.DEV_ACCESS_EMAIL;
+  if (env.DEV_ACCESS_EMAIL && local && !env.ACCESS_AUD) return env.DEV_ACCESS_EMAIL;
   const token = request.headers.get("Cf-Access-Jwt-Assertion");
   if (!token) return null;
   try {
@@ -102,6 +119,11 @@ async function accessEmail(request, env, url) {
 }
 
 async function createMessage(request, env, author) {
+  // Refuse an obviously oversized body before buffering it. The header is optional
+  // (chunked uploads), so the size check after parsing still stands.
+  const declared = Number(request.headers.get("Content-Length"));
+  if (declared > MAX_PHOTO_BYTES + 64 * 1024) return json({ error: "photo_too_big" }, 413);
+
   let form;
   try {
     form = await request.formData();
@@ -109,23 +131,48 @@ async function createMessage(request, env, author) {
     return json({ error: "bad_form" }, 400);
   }
   const photo = form.get("photo");
-  const text = String(form.get("text") || "").trim();
+  const rawText = form.get("text");
+  const text = typeof rawText === "string" ? rawText.trim() : "";
   if (!(photo instanceof File)) return json({ error: "photo_missing" }, 400);
-  if (!PHOTO_TYPES.includes(photo.type)) return json({ error: "photo_type" }, 415);
   if (photo.size > MAX_PHOTO_BYTES) return json({ error: "photo_too_big" }, 413);
   if (Array.from(text).length > MAX_TEXT_CHARS) return json({ error: "text_too_long" }, 400);
+  const bytes = new Uint8Array(await photo.arrayBuffer());
+  const type = sniffPhotoType(bytes);
+  if (!type) return json({ error: "photo_type" }, 415);
 
   const id = newId();
   const key = `photos/${id}`;
-  await env.PHOTOS.put(key, await photo.arrayBuffer(), { httpMetadata: { contentType: photo.type } });
-  await env.DB.prepare(
-    "INSERT INTO messages (id, text, author, photo_key, content_type, created_at)" +
-    " VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-  ).bind(id, text, author, key, photo.type, Date.now()).run();
+  await env.PHOTOS.put(key, bytes, { httpMetadata: { contentType: type } });
+  try {
+    await env.DB.prepare(
+      "INSERT INTO messages (id, text, author, photo_key, content_type, created_at)" +
+      " VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    ).bind(id, text, author, key, type, Date.now()).run();
+  } catch (err) {
+    // No row points at the photo: don't leave it behind in R2.
+    try {
+      await env.PHOTOS.delete(key);
+    } catch (cleanupErr) {
+      console.error("orphan photo", key, cleanupErr);
+    }
+    throw err;
+  }
   return json({ id }, 201);
 }
 
+// Cookies ride along on cross-site requests too, so state-changing calls must come
+// from the upload page itself. Browsers send at least one of these headers.
+function crossSite(request, url) {
+  const site = request.headers.get("Sec-Fetch-Site");
+  if (site !== null && site !== "same-origin") return true;
+  const origin = request.headers.get("Origin");
+  return origin !== null && origin !== url.origin;
+}
+
 async function handlePage(request, env, url) {
+  if (request.method !== "GET" && request.method !== "HEAD" && crossSite(request, url)) {
+    return json({ error: "forbidden" }, 403);
+  }
   const email = await accessEmail(request, env, url);
   if (!email) return json({ error: "forbidden" }, 403);
   const path = url.pathname;
@@ -148,7 +195,12 @@ async function handlePage(request, env, url) {
     const row = await env.DB.prepare("SELECT photo_key FROM messages WHERE id = ?1").bind(m[1]).first();
     if (!row) return notFound();
     await env.DB.prepare("DELETE FROM messages WHERE id = ?1").bind(m[1]).run();
-    await env.PHOTOS.delete(row.photo_key);
+    try {
+      await env.PHOTOS.delete(row.photo_key);
+    } catch (err) {
+      // The message is gone either way; a leftover object is only wasted space.
+      console.error("orphan photo", row.photo_key, err);
+    }
     return new Response(null, { status: 204 });
   }
 

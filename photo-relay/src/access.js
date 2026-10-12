@@ -1,4 +1,4 @@
-import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from "jose";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 // Cloudflare Access signs a JWT for every request it lets through and sends it as
 // Cf-Access-Jwt-Assertion. Checking it here means a misconfigured Access policy
@@ -7,8 +7,6 @@ let remoteKeys = null;
 let remoteKeysUrl = null;
 
 function teamKeys(env) {
-  // Test-only: vitest.config.js provides its own public key.
-  if (env.ACCESS_JWKS_JSON) return createLocalJWKSet(JSON.parse(env.ACCESS_JWKS_JSON));
   const url = `https://${env.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`;
   if (remoteKeysUrl !== url) {
     remoteKeys = createRemoteJWKSet(new URL(url)); // fetches and caches the team's keys
@@ -21,6 +19,7 @@ function teamKeys(env) {
 export async function verifyAccess(token, env) {
   if (!env.ACCESS_TEAM_DOMAIN || !env.ACCESS_AUD) throw new Error("Access not configured");
   const { payload } = await jwtVerify(token, teamKeys(env), {
+    algorithms: ["RS256"], // what Access signs with; never trust the token's own "alg"
     issuer: `https://${env.ACCESS_TEAM_DOMAIN}`,
     audience: env.ACCESS_AUD,
   });
