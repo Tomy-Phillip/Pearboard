@@ -8,7 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const WEB_DIR = path.join(__dirname, "..", "app", "src", "main", "assets", "web");
-const FILES = ["app.js", "calendar-worker.js", "calendar-ics.js"];
+const FILES = ["app.js", "calendar-worker.js", "calendar-ics.js", "photo-queue.js"];
 
 const RULES = [
   // The stock API 25 Android TV emulator ships WebView 55.
