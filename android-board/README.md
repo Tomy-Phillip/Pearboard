@@ -47,8 +47,10 @@ fois la TV tournée. Cible : Fire TV sous Fire OS 6 (≈ Android 7.1, API 25) ou
   L'app le relit toutes les 10 minutes.
 - Un événement présent dans deux agendas (invitation partagée) apparaît deux fois, une
   fois par personne.
-- **Ne partagez pas l'APK** : les adresses secrètes y sont incluses et récupérables. Si
-  l'une a fuité, réinitialisez-la dans Google Agenda (même écran) et reconstruisez.
+- **Ne partagez pas l'APK** : les adresses secrètes y sont incluses et récupérables,
+  tout comme le jeton des photos (`PHOTOS_TOKEN`, voir plus bas). Si une adresse a
+  fuité, réinitialisez-la dans Google Agenda (même écran) et reconstruisez ; pour le
+  jeton, voir [Changer le jeton de la TV](../photo-relay/README.md#changer-le-jeton-de-la-tv).
 
 ## Construire
 
@@ -77,6 +79,32 @@ L'APK est produit dans `app/build/outputs/apk/debug/app-debug.apk`.
 L'app apparaît dans « Vos applications ». Pour la mettre à jour : reconstruire, puis
 relancer le même `adb install -r`.
 
+## Photos à distance
+
+Depuis le téléphone, on peut envoyer une photo (avec légende) qui s'affiche en plein
+écran sur la TV. Les photos passent par un Worker Cloudflare : sa mise en place est
+décrite dans [`photo-relay/README.md`](../photo-relay/README.md).
+
+1. Une fois le Worker déployé, ajoutez deux lignes à `android-board/local.properties` :
+
+   ```properties
+   PHOTOS_URL=https://pearboard-photos.<sous-domaine>.workers.dev
+   PHOTOS_TOKEN=<le TV_TOKEN du Worker>
+   ```
+
+2. Reconstruisez et réinstallez l'app.
+
+- Sans `PHOTOS_URL`, la fonction est désactivée. `PHOTOS_URL` sans `PHOTOS_TOKEN` fait
+  échouer la construction.
+- La TV interroge le Worker toutes les 30 secondes : une photo envoyée apparaît donc en
+  une trentaine de secondes.
+- N'importe quelle touche de la télécommande (flèches, OK, Retour, Menu, Lecture/Pause)
+  passe à la photo suivante. Après la dernière, le tableau revient.
+- Une photo reste affichée tant qu'on n'appuie sur aucune touche : le retour automatique
+  après 5 minutes ne la ferme pas.
+- « Photos : jeton refusé » dans la carte de l'horloge signifie que `PHOTOS_TOKEN` et le
+  `TV_TOKEN` du Worker diffèrent.
+
 ## Télécommande
 
 | Touche | Action |
@@ -86,6 +114,7 @@ relancer le même `adb install -r`.
 | OK | Ouvre les événements du jour sélectionné (lecture seule) ; referme le panneau s'il est ouvert |
 | Menu (≡) ou Lecture/Pause | Bascule entre la vue Mois et la vue Semaine |
 | Retour | Ferme le panneau du jour ; sinon quitte l'app |
+| N'importe quelle touche (photo affichée) | Photo suivante ; après la dernière, retour au tableau |
 
 Sans aucune touche pendant 5 minutes, le panneau se ferme et l'affichage revient au
 mois en cours, sur aujourd'hui.
@@ -100,6 +129,7 @@ npm test        # tests (analyse iCal, compatibilité vieux WebView)
 npm run dev     # http://localhost:8123/web/index.html avec deux agendas d'exemple
 DEV_CALENDARS="Tomy=/chemin/a.ics;Lily=/chemin/b.ics" npm run dev   # avec vos fichiers .ics
 ROTATION=ccw npm run dev   # tourné comme sur la TV (par défaut : droit, en portrait)
+DEV_PHOTOS=1 npm run dev   # avec deux photos d'exemple
 ```
 
 Ajoutez `?theme=dark` ou `?theme=light` à l'adresse pour forcer un thème sans attendre
