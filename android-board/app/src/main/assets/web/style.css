@@ -49,22 +49,22 @@
 }
 
 /* One palette per calendar (config.js gives each calendar one of these names):
- * chip = event pill, dot = legend dot / stripe, avatar = initial bubble,
+ * chip = event pill, dot = legend dot / stripe,
  * soft = background of its "today" card. */
-.cal-color--red    { --c-chip: #fbd2d2; --c-dot: #e57373; --c-avatar: #f5a8a8; --c-soft: #fde8e8; }
-.cal-color--green  { --c-chip: #c9ecd3; --c-dot: #5cb874; --c-avatar: #a2dcb2; --c-soft: #e4f5e9; }
-.cal-color--blue   { --c-chip: #c7e3fc; --c-dot: #4a9be8; --c-avatar: #9fcef6; --c-soft: #e3f0fd; }
-.cal-color--amber  { --c-chip: #f7dfb5; --c-dot: #d39b35; --c-avatar: #ecc687; --c-soft: #fcf1de; }
-.cal-color--purple { --c-chip: #e3d6f7; --c-dot: #9b72d9; --c-avatar: #c8b0f0; --c-soft: #f2ebfb; }
-.cal-color--teal   { --c-chip: #c6ece9; --c-dot: #3eaaa2; --c-avatar: #96d8d2; --c-soft: #e2f5f3; }
+.cal-color--red    { --c-chip: #fbd2d2; --c-dot: #e57373; --c-soft: #fde8e8; }
+.cal-color--green  { --c-chip: #c9ecd3; --c-dot: #5cb874; --c-soft: #e4f5e9; }
+.cal-color--blue   { --c-chip: #c7e3fc; --c-dot: #4a9be8; --c-soft: #e3f0fd; }
+.cal-color--amber  { --c-chip: #f7dfb5; --c-dot: #d39b35; --c-soft: #fcf1de; }
+.cal-color--purple { --c-chip: #e3d6f7; --c-dot: #9b72d9; --c-soft: #f2ebfb; }
+.cal-color--teal   { --c-chip: #c6ece9; --c-dot: #3eaaa2; --c-soft: #e2f5f3; }
 
 /* Same hues, deep enough for light text at night. */
-[data-theme="dark"] .cal-color--red    { --c-chip: #5c2b2f; --c-avatar: #8c4046; --c-soft: #2e2023; }
-[data-theme="dark"] .cal-color--green  { --c-chip: #24492f; --c-avatar: #3b7049; --c-soft: #1c2a21; }
-[data-theme="dark"] .cal-color--blue   { --c-chip: #1f3f60; --c-avatar: #33608f; --c-soft: #1a2633; }
-[data-theme="dark"] .cal-color--amber  { --c-chip: #57431c; --c-avatar: #85672b; --c-soft: #2c261b; }
-[data-theme="dark"] .cal-color--purple { --c-chip: #3e2f5c; --c-avatar: #5f4a8c; --c-soft: #241f30; }
-[data-theme="dark"] .cal-color--teal   { --c-chip: #1d4a47; --c-avatar: #2f716c; --c-soft: #1a2b2a; }
+[data-theme="dark"] .cal-color--red    { --c-chip: #5c2b2f; --c-soft: #2e2023; }
+[data-theme="dark"] .cal-color--green  { --c-chip: #24492f; --c-soft: #1c2a21; }
+[data-theme="dark"] .cal-color--blue   { --c-chip: #1f3f60; --c-soft: #1a2633; }
+[data-theme="dark"] .cal-color--amber  { --c-chip: #57431c; --c-soft: #2c261b; }
+[data-theme="dark"] .cal-color--purple { --c-chip: #3e2f5c; --c-soft: #241f30; }
+[data-theme="dark"] .cal-color--teal   { --c-chip: #1d4a47; --c-soft: #1a2b2a; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 *, *::before, *::after { cursor: none; }
@@ -138,11 +138,14 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
   padding: 52px 48px 44px;
 }
 
+/* Sized for the widest time, "00:00" (~380px), in the clock card's 398px:
+ * the bundled DM Sans subset has no tabular digits, so widths vary by time. */
 .clock-time {
-  font-size: 176px;
+  font-size: 136px;
   font-weight: 400;
-  letter-spacing: -6px;
+  letter-spacing: -4px;
   line-height: 1;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
@@ -203,7 +206,7 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 38px 30px 26px;
+  padding: 38px 22px 18px;
   margin-bottom: 28px;
 }
 
@@ -258,7 +261,7 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   flex: none;
-  margin: 26px 0 10px;
+  margin: 20px 0 8px;
   font-size: 26px;
   color: var(--muted);
   text-align: center;
@@ -269,10 +272,11 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  grid-gap: 10px;
+  grid-gap: 8px;
 }
 
 .cal-cell {
+  position: relative; /* chips' offsetTop, for fitMonthChips() in app.js */
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -310,13 +314,14 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
   text-align: center;
 }
 
+/* One line in month view: the text is kept small so more of the title shows. */
 .cal-chip {
   flex: none;
-  margin-top: 6px;
-  padding: 1px 8px;
-  border-radius: 8px;
+  margin-top: 5px;
+  padding: 1px 5px;
+  border-radius: 7px;
   background: var(--c-chip, var(--chip-neutral));
-  font-size: 23px;
+  font-size: 19px;
   font-weight: 500;
   line-height: 1.35;
   white-space: nowrap;
@@ -333,6 +338,7 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
 .cal-grid.is-week .cal-chip {
   margin-top: 10px;
   padding: 6px 8px;
+  font-size: 23px;
   white-space: normal;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -343,17 +349,17 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
   display: flex;
   justify-content: center;
   flex: none;
-  margin-top: 18px;
-  padding-top: 20px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 2px solid var(--line);
-  font-size: 32px;
+  font-size: 22px;
 }
 
-.cal-legend-item { display: flex; align-items: center; margin: 0 22px; }
+.cal-legend-item { display: flex; align-items: center; margin: 0 18px; }
 .cal-legend-dot {
-  width: 22px;
-  height: 22px;
-  margin-right: 12px;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
   border-radius: 50%;
   background: var(--c-dot);
 }
@@ -396,36 +402,23 @@ html[data-rotate="none"] body { width: 1080px; height: 1920px; }
   grid-gap: 18px;
 }
 
+/* Grows with its title, shown in full: the calendar above gives up the room. */
 .today-event {
   display: flex;
   align-items: center;
   min-width: 0;
-  height: 112px;
-  padding: 0 24px;
+  min-height: 112px;
+  padding: 16px 24px;
   border-radius: 28px;
   background: var(--c-soft, var(--chip-neutral));
-}
-
-.today-avatar {
-  flex: none;
-  width: 68px;
-  height: 68px;
-  margin-right: 22px;
-  border-radius: 50%;
-  background: var(--c-avatar);
-  font-size: 30px;
-  font-weight: 600;
-  line-height: 68px;
-  text-align: center;
 }
 
 .today-text { min-width: 0; }
 .today-event-title {
   font-size: 34px;
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.2;
+  word-wrap: break-word;
 }
 .today-event-time { font-size: 27px; color: var(--muted); }
 

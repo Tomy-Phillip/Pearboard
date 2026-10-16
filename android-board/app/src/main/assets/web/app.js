@@ -823,9 +823,30 @@ function eventChip(ev, withTime) {
   return chip;
 }
 
-// How many one-line chips fit under the day number in a month cell.
-const MONTH_CELL_HEAD_PX = 58; // padding + number row
-const MONTH_CHIP_PX = 38;      // chip + its top margin
+const MONTH_CELL_PAD_BOTTOM_PX = 6; // .cal-cell bottom padding
+
+// How many chips fit under the day number is measured once they are laid out
+// (a 6-week month has shorter cells than a 5-week one): all reads first, then
+// all writes, for a single reflow.
+function fitMonthChips() {
+  const cells = dom.calGrid.children;
+  const cuts = [];
+  for (let i = 0; i < cells.length; i++) {
+    const chips = cells[i].querySelectorAll(".cal-chip");
+    const bottom = cells[i].clientHeight - MONTH_CELL_PAD_BOTTOM_PX;
+    let fit = 0;
+    while (fit < chips.length && chips[fit].offsetTop + chips[fit].offsetHeight <= bottom) fit++;
+    if (fit < chips.length) cuts.push({ cell: cells[i], chips: chips, fit: fit });
+  }
+  // What doesn't fit is counted as "+N" beside the day number.
+  for (const cut of cuts) {
+    for (let j = cut.fit; j < cut.chips.length; j++) cut.cell.removeChild(cut.chips[j]);
+    const more = document.createElement("span");
+    more.className = "cal-more";
+    more.textContent = `+${cut.chips.length - cut.fit}`;
+    cut.cell.querySelector(".cal-cell-head").appendChild(more);
+  }
+}
 
 function renderCalendar() {
   const range = visibleRange();
@@ -837,10 +858,6 @@ function renderCalendar() {
   dom.viewMonth.classList.toggle("is-active", !isWeek);
   dom.calGrid.classList.toggle("is-week", isWeek);
   dom.calGrid.style.gridTemplateRows = `repeat(${weeks}, minmax(0, 1fr))`;
-
-  // Measured, not guessed: a 6-week month has shorter cells than a 5-week one.
-  const rowPx = (dom.calGrid.clientHeight - 10 * (weeks - 1)) / weeks;
-  const maxChips = isWeek ? Infinity : Math.max(1, Math.floor((rowPx - MONTH_CELL_HEAD_PX) / MONTH_CHIP_PX));
 
   const today = new Date();
   dom.calGrid.innerHTML = "";
@@ -861,16 +878,7 @@ function renderCalendar() {
     head.appendChild(num);
     cell.appendChild(head);
 
-    const evs = eventsForDay(cellDate);
-    // What doesn't fit is counted as "+N" beside the day number.
-    const shown = Math.min(evs.length, maxChips);
-    if (evs.length > shown) {
-      const more = document.createElement("span");
-      more.className = "cal-more";
-      more.textContent = `+${evs.length - shown}`;
-      head.appendChild(more);
-    }
-    for (const ev of evs.slice(0, shown)) cell.appendChild(eventChip(ev, isWeek));
+    for (const ev of eventsForDay(cellDate)) cell.appendChild(eventChip(ev, isWeek));
 
     cell.addEventListener("click", () => {
       state.focusedDateKey = cell.dataset.date;
@@ -878,6 +886,7 @@ function renderCalendar() {
     });
     dom.calGrid.appendChild(cell);
   }
+  if (!isWeek) fitMonthChips();
   // With the day panel up, focus goes back to the grid when the panel closes.
   if (!isDayPanelOpen()) focusCell(state.focusedDateKey);
 }
@@ -887,13 +896,8 @@ function renderCalendar() {
  * ========================================================================= */
 
 function todayCard(ev) {
-  const cal = calendarOf(ev);
-  const avatar = cal.name
-    ? `<span class="today-avatar">${escapeHtml(cal.name.charAt(0).toUpperCase())}</span>`
-    : "";
   return `
     <div class="today-event ${colorClass(ev)}">
-      ${avatar}
       <div class="today-text">
         <div class="today-event-title">${escapeHtml(ev.summary || "(sans titre)")}</div>
         <div class="today-event-time">${formatEventTime(ev)}</div>
