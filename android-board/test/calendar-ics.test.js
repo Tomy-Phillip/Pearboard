@@ -25,6 +25,22 @@ test("timed event with TZID becomes UTC dateTime", () => {
   }]);
 });
 
+test("an event in both feeds of a merged calendar shows once", () => {
+  const shared = vevent(
+    "UID:shared", "SUMMARY:Souper",
+    "DTSTART;TZID=America/Toronto:20261015T180000",
+    "DTEND;TZID=America/Toronto:20261015T190000",
+  );
+  const own = vevent(
+    "UID:own", "SUMMARY:Piano",
+    "DTSTART;TZID=America/Toronto:20261016T180000",
+    "DTEND;TZID=America/Toronto:20261016T190000",
+  );
+  // What IcsProxy.merge serves: both feeds' VEVENTs (and VTIMEZONEs) in one VCALENDAR.
+  const evs = october(ics(shared, "BEGIN:VTIMEZONE\r\nTZID:X\r\nEND:VTIMEZONE", shared, own));
+  assert.deepEqual(evs.map((e) => e.summary).sort(), ["Piano", "Souper"]);
+});
+
 test("all-day event keeps date strings with exclusive end", () => {
   const evs = october(ics(vevent(
     "UID:b", "SUMMARY:Congé",

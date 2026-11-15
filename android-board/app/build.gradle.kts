@@ -14,25 +14,32 @@ val localProps = Properties().apply {
 fun localProp(key: String): String = localProps.getProperty(key, "").trim()
 
 // Colors the web UI knows (style.css .cal-color--*); calendars without
-// CAL_n_COLOR take them in this order.
+// CAL_n_COLOR take them in this order. CAL_n_COLOR may also be any #rrggbb:
+// app.js derives its lighter / night shades.
 val calendarColors = listOf("red", "green", "blue", "amber", "purple", "teal")
+val hexColor = Regex("#[0-9a-f]{6}")
 
-data class CalendarConfig(val name: String, val url: String, val color: String)
+data class CalendarConfig(val name: String, val urls: List<String>, val color: String)
+
+// CAL_n_URL may list several addresses, separated by commas: IcsProxy merges
+// them into one feed, shown under one name and one color.
+fun splitUrls(value: String): List<String> = value.split(Regex("[,\\s]+")).filter { it.isNotEmpty() }
 
 // One calendar per person: CAL_1_NAME / CAL_1_URL / CAL_1_COLOR (optional), CAL_2_…
 // A lone ICAL_URL (the original setup) still works as one unnamed calendar.
 val calendars: List<CalendarConfig> = run {
     val numbered = (1..20).mapNotNull { n ->
-        val url = localProp("CAL_${n}_URL")
+        val url = splitUrls(localProp("CAL_${n}_URL"))
         if (url.isEmpty()) return@mapNotNull null
         val color = localProp("CAL_${n}_COLOR").lowercase()
-        require(color.isEmpty() || color in calendarColors) {
-            "CAL_${n}_COLOR=$color in local.properties: use one of ${calendarColors.joinToString()}"
+        require(color.isEmpty() || color in calendarColors || hexColor.matches(color)) {
+            "CAL_${n}_COLOR=$color in local.properties: use one of ${calendarColors.joinToString()} " +
+                "or a #rrggbb color"
         }
         CalendarConfig(localProp("CAL_${n}_NAME"), url, color)
     }
     val all = numbered.ifEmpty {
-        localProp("ICAL_URL").let { if (it.isEmpty()) emptyList() else listOf(CalendarConfig("", it, "")) }
+        splitUrls(localProp("ICAL_URL")).let { if (it.isEmpty()) emptyList() else listOf(CalendarConfig("", it, "")) }
     }
     all.mapIndexed { i, c -> c.copy(color = c.color.ifEmpty { calendarColors[i % calendarColors.size] }) }
 }
@@ -70,9 +77,12 @@ android {
         versionName = "1.1"
 
         // Only the addresses go to Kotlin; names and colors go to the page through config.js.
+        // One row per calendar, one entry per address merged into it.
         buildConfigField(
-            "String[]", "CALENDAR_URLS",
-            calendars.joinToString(", ", "new String[] {", "}") { javaString(it.url) },
+            "String[][]", "CALENDAR_URLS",
+            calendars.joinToString(", ", "new String[][] {", "}") { c ->
+                c.urls.joinToString(", ", "{", "}") { javaString(it) }
+            },
         )
         buildConfigField("String", "PHOTOS_URL", javaString(photosUrl))
         buildConfigField("String", "PHOTOS_TOKEN", javaString(photosToken))

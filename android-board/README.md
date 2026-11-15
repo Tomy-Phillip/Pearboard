@@ -32,8 +32,14 @@ fois la TV tournée. Cible : Fire TV sous Fire OS 6 (≈ Android 7.1, API 25) ou
 
    - Numérotez à partir de 1 (`CAL_1_…`, `CAL_2_…`, … jusqu'à 20).
    - Le nom apparaît dans la légende et son initiale sur les événements du jour.
-   - `CAL_n_COLOR` est facultatif : `red`, `green`, `blue`, `amber`, `purple` ou `teal`
-     (sinon, dans cet ordre).
+   - `CAL_n_COLOR` est facultatif : `red`, `green`, `blue`, `amber`, `purple`, `teal`,
+     ou n'importe quelle couleur `#rrggbb` (ex. `CAL_1_COLOR=#e91e63`) dont l'app
+     dérive les teintes claires et de nuit (sinon, les noms dans cet ordre).
+   - Pour réunir plusieurs agendas sous un même nom et une même couleur, mettez
+     leurs adresses dans le même `CAL_n_URL`, séparées par des virgules
+     (`CAL_1_URL=https://…/basic.ics,https://…/basic.ics`). Un événement présent
+     dans les deux n'apparaît qu'une fois.
+   - La semaine commence le dimanche.
    - Une seule ligne `ICAL_URL=…` (l'ancienne configuration) marche encore : un agenda
      sans nom ni légende.
    - Sans aucun agenda, l'app fonctionne mais affiche « Calendrier non configuré ».

@@ -29,9 +29,16 @@
     }
 
     // Exceptions (RECURRENCE-ID) may appear before their master in the feed.
+    // A calendar merged from several feeds (IcsProxy) holds an event both
+    // people were invited to once per feed: keep the first copy.
     const masters = [];
     const exceptionsByUid = new Map();
+    const seen = new Set();
     for (const vevent of cal.getAllSubcomponents("vevent")) {
+      const rid = vevent.getFirstPropertyValue("recurrence-id");
+      const key = vevent.getFirstPropertyValue("uid") + "|" + (rid ? rid.toString() : "");
+      if (seen.has(key)) continue;
+      seen.add(key);
       warnUnknownZones(vevent);
       if (vevent.hasProperty("recurrence-id")) {
         const uid = vevent.getFirstPropertyValue("uid");

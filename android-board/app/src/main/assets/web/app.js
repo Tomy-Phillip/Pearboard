@@ -185,9 +185,41 @@ function calendarOf(ev) {
   return CALENDARS[ev.calId] || { name: "", color: "" };
 }
 
+/* A #rrggbb CAL_n_COLOR gets a generated palette (same roles as the named ones
+ * in style.css): its own color for the dot, mixed into the card color for the
+ * chip and the soft background, by day and by night. color-mix() is too new
+ * for the Fire TV's WebView, hence the arithmetic here. */
+function mixHex(hex, base, amount) {
+  const ch = (h, i) => parseInt(h.substr(1 + 2 * i, 2), 16);
+  return "#" + [0, 1, 2].map((i) =>
+    ("0" + Math.round(ch(hex, i) * amount + ch(base, i) * (1 - amount)).toString(16)).slice(-2)).join("");
+}
+
+function installCustomColors() {
+  const rules = [];
+  CALENDARS.forEach((c, i) => {
+    if (!/^#[0-9a-f]{6}$/i.test(c.color)) return;
+    const sel = `.cal-color--custom${i}`;
+    rules.push(
+      `${sel} { --c-dot: ${c.color}; --c-chip: ${mixHex(c.color, "#ffffff", 0.32)}; ` +
+        `--c-soft: ${mixHex(c.color, "#ffffff", 0.16)}; }`,
+      `[data-theme="dark"] ${sel} { --c-chip: ${mixHex(c.color, "#191d20", 0.32)}; ` +
+        `--c-soft: ${mixHex(c.color, "#191d20", 0.1)}; }`,
+    );
+    c.className = sel.slice(1);
+  });
+  if (!rules.length) return;
+  const style = document.createElement("style");
+  style.textContent = rules.join("\n");
+  document.head.appendChild(style);
+}
+
+function calendarClass(c) {
+  return c.className || (c.color ? `cal-color--${c.color}` : "");
+}
+
 function colorClass(ev) {
-  const color = calendarOf(ev).color;
-  return color ? `cal-color--${color}` : "";
+  return calendarClass(calendarOf(ev));
 }
 
 function renderLegend() {
@@ -197,7 +229,7 @@ function renderLegend() {
     return;
   }
   dom.calLegend.innerHTML = named.map((c) => `
-    <span class="cal-legend-item cal-color--${c.color}">
+    <span class="cal-legend-item ${calendarClass(c)}">
       <span class="cal-legend-dot"></span>${escapeHtml(c.name)}
     </span>`).join("");
 }
@@ -560,20 +592,20 @@ function anyCalendarLoaded() {
   return state.cals.some((c) => c.loaded);
 }
 
-// Sunday-based getDay() → Monday-first week, as on Québec wall calendars.
-function mondayOf(d) {
+// Weeks start on Sunday (getDay() === 0), like index.html's day headers.
+function sundayOf(d) {
   const x = startOfDay(d);
-  return addDays(x, -((x.getDay() + 6) % 7));
+  return addDays(x, -x.getDay());
 }
 
 // Whole weeks covering the month: 4 to 6 rows.
 function monthRange(y, m) {
-  return [mondayOf(new Date(y, m, 1)), addDays(mondayOf(new Date(y, m + 1, 0)), 7)];
+  return [sundayOf(new Date(y, m, 1)), addDays(sundayOf(new Date(y, m + 1, 0)), 7)];
 }
 
 function visibleRange() {
   if (state.view === "week") {
-    const start = mondayOf(parseDateKey(state.focusedDateKey));
+    const start = sundayOf(parseDateKey(state.focusedDateKey));
     return [start, addDays(start, 7)];
   }
   return monthRange(state.viewedYear, state.viewedMonth);
@@ -1219,6 +1251,7 @@ function init() {
   state.todayKey = dateKey(now);
   state.lastInputAt = Date.now();
 
+  installCustomColors();
   renderLegend();
   applyTheme(); // from the fallback hours until the weather (cached or fresh) arrives
   startClock();
