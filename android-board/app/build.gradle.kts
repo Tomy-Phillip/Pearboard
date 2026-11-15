@@ -66,8 +66,8 @@ android {
         applicationId = "com.pearboard.tv"
         minSdk = 25 // Fire OS 6
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         // Only the addresses go to Kotlin; names and colors go to the page through config.js.
         buildConfigField(
